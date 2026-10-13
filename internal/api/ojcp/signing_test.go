@@ -122,6 +122,7 @@ func TestTheSignatureStatesWhoSignedAndForHowLong(t *testing.T) {
 
 	if sig == nil {
 		t.Fatal("signature is nil")
+		return // staticcheck cannot see that Fatal does not return
 	}
 	if sig.Alg != "ES256" {
 		t.Errorf("alg = %q, want ES256", sig.Alg)
