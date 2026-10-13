@@ -17,14 +17,15 @@ require (
 	github.com/chromedp/chromedp v0.16.0
 	github.com/disintegration/imaging v1.6.2
 	github.com/fasthttp/websocket v1.5.12
-	github.com/getsentry/sentry-go v0.49.0
-	github.com/getsentry/sentry-go/fiber v0.49.0
+	github.com/getsentry/sentry-go v0.50.0
+	github.com/getsentry/sentry-go/fiber v0.50.0
 	github.com/go-redis/redis_rate/v10 v10.0.1
 	github.com/gofiber/contrib/websocket v1.3.4
 	github.com/gofiber/fiber/v2 v2.52.15
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
+	github.com/gowebpki/jcs v1.0.0
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/inngest/inngestgo v0.16.5
 	github.com/invopop/jsonschema v0.14.0
@@ -119,7 +120,6 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gosimple/slug v1.12.0 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
-	github.com/gowebpki/jcs v1.0.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inngest/inngest v1.19.3 // indirect
