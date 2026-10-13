@@ -25,6 +25,7 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/google/jsonschema-go v0.4.3
 	github.com/google/uuid v1.6.0
+	github.com/gowebpki/jcs v1.0.0
 	github.com/gzuidhof/tygo v0.2.21
 	github.com/inngest/inngestgo v0.16.5
 	github.com/invopop/jsonschema v0.14.0
@@ -45,7 +46,7 @@ require (
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.3
 	github.com/testcontainers/testcontainers-go v0.44.0
 	github.com/testcontainers/testcontainers-go/modules/postgres v0.44.0
-	github.com/tmc/langchaingo v0.1.14
+	github.com/tmc/langchaingo v0.1.15
 	github.com/valyala/fasthttp v1.74.0
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.57.0
@@ -119,7 +120,6 @@ require (
 	github.com/gorilla/css v1.0.1 // indirect
 	github.com/gosimple/slug v1.12.0 // indirect
 	github.com/gosimple/unidecode v1.0.1 // indirect
-	github.com/gowebpki/jcs v1.0.0 // indirect
 	github.com/hashicorp/errwrap v1.1.0 // indirect
 	github.com/hashicorp/go-multierror v1.1.1 // indirect
 	github.com/inngest/inngest v1.19.3 // indirect
