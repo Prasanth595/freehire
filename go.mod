@@ -50,7 +50,7 @@ require (
 	github.com/valyala/fasthttp v1.74.0
 	github.com/yuin/goldmark v1.8.6
 	golang.org/x/crypto v0.58.0
-	golang.org/x/image v0.46.0
+	golang.org/x/image v0.47.0
 	golang.org/x/net v0.60.0
 	golang.org/x/oauth2 v0.37.0
 	golang.org/x/sync v0.24.0
