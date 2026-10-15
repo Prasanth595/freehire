@@ -394,6 +394,13 @@ func All(c HTTPClient) map[string]Source {
 		// Japan Dev: curated Japan technology aggregator. One public sitemap lists posting URLs;
 		// detail pages carry structured Nuxt SSR state and official ATS apply links when available.
 		NewJapanDev(c),
+		// ITviec: Vietnam's IT-only board. One server-rendered listing names the whole
+		// catalogue; posting pages carry a schema.org JobPosting. Paced, see itviecRequestInterval.
+		NewITviec(pacedHTMLGetter(c, itviecRequestInterval, itviecRequestBurst)),
+		// Welcome to the Jungle: European multi-company board, enumerated by WTTJ's own
+		// profession sub-category (board) over its public Algolia index, hydrating each new
+		// posting's body and apply URL from the posting API. See wttj.go.
+		NewWTTJ(c),
 		// EDJOIN: California's K-12 education board, multi-company aggregator enumerated by
 		// job type (board) over one central index, hydrating bodies from each posting page's
 		// schema.org block. The board is a job type and not a district on purpose — see
@@ -414,8 +421,13 @@ func All(c HTTPClient) map[string]Source {
 		NewYandexCrowd(c),
 		NewOzon(c),
 		NewAvito(c),
+		// Kaspi.kz (Kazakhstan): the same sitemap + JobPosting ld+json shape as Avito.
+		NewKaspi(c),
+		NewX5(c),
 		NewRWB(c),
 		NewSber(c),
+		// Uzum (Uzbekistan): sitemap + per-vacancy RSC flight; see uzum.go.
+		NewUzum(c),
 		// Alfa-Bank's careers API serves a certificate issued by the Russian Trusted Root
 		// CA, which no standard trust store carries, so it fails the TLS handshake on the
 		// shared client. It gets its own client that trusts that one extra root — see
@@ -435,6 +447,11 @@ func All(c HTTPClient) map[string]Source {
 		NewRostelecom(c),
 		NewVK(c),
 		NewTwoGIS(c),
+		// Kaspersky: no public API; the listing's RSC flight carries the structured fields
+		// and the posting page the body. See kaspersky.go.
+		NewKaspersky(c),
+		// Magnit Tech: the retail group's IT arm, a keyless JSON API (list → detail).
+		NewMagnit(c),
 	)
 	// usajobs, reed, whatjobs and adzuna are the keyed sources: each needs a credential read from
 	// the environment, never from a board file. The credential gates the CRAWL registry only — a
