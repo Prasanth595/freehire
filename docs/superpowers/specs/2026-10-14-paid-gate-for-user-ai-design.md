@@ -2,7 +2,7 @@
 
 ## Status
 
-Design approved by the product owner on 2026-10-14. Awaiting review of this written spec before implementation.
+Implemented. Design approved by the product owner on 2026-10-14.
 
 ## Goal
 
