@@ -54,3 +54,29 @@ func TestPaidExtractionGatesTheBackgroundModelCall(t *testing.T) {
 		})
 	}
 }
+
+// A free account's skipped extraction must not reach the client as `failed`: every surface
+// renders that as "couldn't read your CV", which is false — the file was read, the model was
+// simply not called. Nor is it pending, since no retry will run until the plan changes.
+func TestWireParseStatusSeparatesPlanFromFailure(t *testing.T) {
+	cases := []struct {
+		name        string
+		in          resume.ExtractStatus
+		wantStatus  string
+		wantPending bool
+	}{
+		{"skipped for plan", resume.ExtractStatus{Status: resume.ExtractStatusFailed, Detail: extractNeedsPaidPlan}, parseStatusRequiresPlan, false},
+		{"real failure", resume.ExtractStatus{Status: resume.ExtractStatusFailed, Detail: "extract failed"}, resume.ExtractStatusFailed, true},
+		{"plan unreadable is a failure", resume.ExtractStatus{Status: resume.ExtractStatusFailed, Detail: "plan unavailable"}, resume.ExtractStatusFailed, true},
+		{"pending", resume.ExtractStatus{Status: resume.ExtractStatusPending}, resume.ExtractStatusPending, true},
+		{"ok", resume.ExtractStatus{Status: resume.ExtractStatusOK}, resume.ExtractStatusOK, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			status, pending := wireParseStatus(tc.in)
+			if status != tc.wantStatus || pending != tc.wantPending {
+				t.Fatalf("wireParseStatus(%+v) = (%q, %v), want (%q, %v)", tc.in, status, pending, tc.wantStatus, tc.wantPending)
+			}
+		})
+	}
+}

@@ -396,6 +396,23 @@ func (h *resumeHandlers) extractStructuredResume(userID int64, text string, uplo
 // the retry, which runs the moment the account is on a paid plan.
 const extractNeedsPaidPlan = "paid plan required"
 
+// parseStatusRequiresPlan is the wire status of an extraction that never ran because the
+// account is not on a paid plan. It is NOT reported as `failed`: every surface renders a
+// failed parse as "couldn't read your CV", which said something false about the candidate's
+// file to every free account that uploaded one — the CV was read, only the model was not
+// called. Distinct from pending as well, because nothing is coming until the plan changes.
+const parseStatusRequiresPlan = "requires_plan"
+
+// wireParseStatus is the parse status a client sees, and whether a structure is still owed.
+// A failure is reported as pending-structure (the retry may fill it); a skipped-for-plan
+// extraction is not, since no retry will run on its own.
+func wireParseStatus(es resume.ExtractStatus) (status string, pending bool) {
+	if es.Status == resume.ExtractStatusFailed && es.Detail == extractNeedsPaidPlan {
+		return parseStatusRequiresPlan, false
+	}
+	return es.Status, es.Status == resume.ExtractStatusPending || es.Status == resume.ExtractStatusFailed
+}
+
 // paidExtraction decides whether an upload's structured extraction may run, and hands back
 // the context it must run on: one carrying the paid mark the binding checks.
 //
@@ -446,9 +463,8 @@ func (h *resumeHandlers) GetResume(c *fiber.Ctx) error {
 		log.Printf("resume structured row: user %d: %v", userID, err)
 	} else {
 		es := resume.ResolveExtractStatus(row)
-		resp.ParseStatus = es.Status
+		resp.ParseStatus, resp.StructurePending = wireParseStatus(es)
 		resp.ParseDetail = es.Detail
-		resp.StructurePending = es.Status == resume.ExtractStatusPending || es.Status == resume.ExtractStatusFailed
 	}
 
 	if owned, err := h.resume.CandidateOwned(c.Context(), userID); err != nil {
