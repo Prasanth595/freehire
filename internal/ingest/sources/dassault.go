@@ -150,8 +150,10 @@ func dassaultJob(h dassaultHit, id string, e CompanyEntry) (Job, bool) {
 		job.EmploymentType = "contract"
 	}
 	if ym := dassaultYears.FindStringSubmatch(years); ym != nil {
-		if n, err := strconv.Atoi(ym[1]); err == nil {
-			job.ExperienceYearsMin = &n
+		// Parsed at 8 bits: the facet's bounds are 0-15, and the value is stored as an int32.
+		if n, err := strconv.ParseUint(ym[1], 10, 8); err == nil {
+			years := int(n)
+			job.ExperienceYearsMin = &years
 		}
 	}
 	return job, true
