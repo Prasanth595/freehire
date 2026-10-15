@@ -180,3 +180,34 @@ func TestTochkaReadingNoneFails(t *testing.T) {
 		t.Fatal("a crawl that listed vacancies and read none of them must fail")
 	}
 }
+
+// If the sitemap becomes an index, every sub-sitemap is followed — and one that fails fails the
+// run rather than truncating the enumeration.
+func TestTochkaFollowsASitemapIndex(t *testing.T) {
+	index := `<?xml version="1.0" encoding="UTF-8"?><sitemapindex xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">` +
+		`<sitemap><loc>https://hr.tochka.com/sitemap-vacancies.xml</loc></sitemap></sitemapindex>`
+	newFake := func() *routedHTTP {
+		return (&routedHTTP{}).
+			route("/vacancies/catalog/analyst-dnk/", tochkaFixture(t, "tochka_vacancy_analyst.html")).
+			route("/vacancies/catalog/menedzher-po-prodazham-vyezdnye-vstrechi-kaluga/", tochkaFixture(t, "tochka_vacancy_kaluga.html"))
+	}
+
+	fake := newFake().route("sitemap-vacancies.xml", tochkaFixture(t, "tochka_sitemap.xml")).route("sitemap.xml", index)
+	jobs, err := NewTochka(fake).Fetch(context.Background(), CompanyEntry{})
+	if err != nil || len(jobs) != 2 {
+		t.Fatalf("jobs, err = %d, %v; want both vacancies through the index", len(jobs), err)
+	}
+
+	broken := newFake().routeErr("sitemap-vacancies.xml", &StatusError{Code: 503}).route("sitemap.xml", index)
+	if _, err := NewTochka(broken).Fetch(context.Background(), CompanyEntry{}); err == nil {
+		t.Fatal("a sub-sitemap that fails must fail the run, not truncate it")
+	}
+}
+
+func TestTochkaSitemapWithoutVacanciesFails(t *testing.T) {
+	fake := (&routedHTTP{}).route("sitemap.xml",
+		`<?xml version="1.0" encoding="UTF-8"?><urlset><url><loc>https://hr.tochka.com/</loc></url></urlset>`)
+	if _, err := NewTochka(fake).Fetch(context.Background(), CompanyEntry{}); err == nil {
+		t.Fatal("a sitemap naming no vacancy pages must fail")
+	}
+}

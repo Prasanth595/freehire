@@ -97,15 +97,21 @@ func (p ptsecurity) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
 	return jobs, nil
 }
 
-// list walks the listing's pages and returns every vacancy, deduplicated by slug. The count is
-// checked against the listing's own total: a walk that came up short would have the sweep
-// close live vacancies it merely did not deliver, so it fails instead. A payload that is
-// missing altogether is a markup change and fails the same way; a total of zero is the site's
-// own answer and yields nothing.
+// list walks the listing's pages and returns every vacancy, deduplicated by slug. The listing
+// carries no other id, and the slug is the vacancy's URL segment, so it is unique among live
+// vacancies by construction: two entries with one slug can only open one page. Even a generic
+// slug is a real route — "vacancy" (Руководитель консалтинговых проектов, 2026-10-14) serves
+// that vacancy at /about/vacancy/vacancy/.
+//
+// The walk is checked against the listing's own total, counting the entries as delivered
+// (before the slug dedup, so a repeated entry cannot fail every crawl): a walk that came up
+// short would have the sweep close live vacancies it merely did not deliver, so it fails
+// instead. A payload that is missing altogether is a markup change and fails the same way; a
+// total of zero is the site's own answer and yields nothing.
 func (p ptsecurity) list(ctx context.Context) ([]ptsecurityVacancy, error) {
 	var out []ptsecurityVacancy
 	seen := map[string]bool{}
-	total := 0
+	total, delivered := 0, 0
 	for page := 1; page <= ptsecurityMaxPages; page++ {
 		flight, err := fetchFlight(ctx, p.http, fmt.Sprintf(ptsecurityListURL, page))
 		if err != nil {
@@ -118,6 +124,7 @@ func (p ptsecurity) list(ctx context.Context) ([]ptsecurityVacancy, error) {
 		total = l.Pagination.Total
 		for _, g := range l.Vacancies {
 			for _, v := range g.Vacancies {
+				delivered++
 				if v.Slug == "" || seen[v.Slug] {
 					continue
 				}
@@ -129,8 +136,8 @@ func (p ptsecurity) list(ctx context.Context) ([]ptsecurityVacancy, error) {
 			break
 		}
 	}
-	if len(out) < total {
-		return nil, fmt.Errorf("ptsecurity: listing delivered %d of its %d vacancies", len(out), total)
+	if delivered < total {
+		return nil, fmt.Errorf("ptsecurity: listing delivered %d of its %d vacancies", delivered, total)
 	}
 	return out, nil
 }
@@ -171,6 +178,10 @@ type ptsecurityAddresses []schemaAddress
 
 func (a *ptsecurityAddresses) UnmarshalJSON(b []byte) error {
 	trimmed := bytes.TrimSpace(b)
+	if bytes.Equal(trimmed, []byte("null")) {
+		*a = nil
+		return nil
+	}
 	if len(trimmed) > 0 && trimmed[0] == '[' {
 		var arr []schemaAddress
 		if err := json.Unmarshal(trimmed, &arr); err != nil {

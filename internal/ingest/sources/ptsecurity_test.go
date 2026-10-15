@@ -2,6 +2,7 @@ package sources
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"slices"
 	"strings"
@@ -47,6 +48,7 @@ func TestPtsecurityFetchMapsListingAndDetail(t *testing.T) {
 	fake := (&routedHTTP{}).
 		route("/about/vacancy/391799/", ptsecurityFixture(t, "ptsecurity_vacancy_391799.html")).
 		route("/about/vacancy/394319/", ptsecurityFixture(t, "ptsecurity_vacancy_394319.html")).
+		route("/about/vacancy/vacancy/", ptsecurityFixture(t, "ptsecurity_vacancy_vacancy.html")).
 		// Every other vacancy the real listing names answers with a page carrying no
 		// article, so it surfaces as an unreadable marker rather than vanishing.
 		route("/about/vacancy/?page=1", ptsecurityFixture(t, "ptsecurity_list.html")).
@@ -115,6 +117,15 @@ func TestPtsecurityFetchMapsListingAndDetail(t *testing.T) {
 	}
 	if !strings.Contains(labs.Description, "Positive Labs") {
 		t.Errorf("Description = %.200q", labs.Description)
+	}
+
+	// "vacancy" is a generic slug, but it is the vacancy's real route: the page it opens is
+	// Руководитель консалтинговых проектов (fixture captured from that URL).
+	consult := byID["vacancy"]
+	if consult.Unreadable || consult.URL != "https://ptsecurity.com/about/vacancy/vacancy/" ||
+		consult.Title != "Руководитель консалтинговых проектов" ||
+		!strings.Contains(consult.Description, "консалтинг") {
+		t.Errorf("vacancy = %+v, want Руководитель консалтинговых проектов read from /about/vacancy/vacancy/", consult)
 	}
 
 	// A vacancy whose page carries no article is named by the listing but unread.
@@ -199,5 +210,32 @@ func TestPtsecurityGoneVacancyIsDropped(t *testing.T) {
 		if j.ExternalID == "394319" {
 			t.Fatalf("a 404 vacancy must be dropped, got %+v", j)
 		}
+	}
+}
+
+// A listing that repeats an entry still delivers its total: the repeat is counted as
+// delivered, then collapsed onto the one page its slug opens.
+func TestPtsecurityRepeatedSlugDoesNotFailTheCrawl(t *testing.T) {
+	entry := `{"title":"A","slug":"vacancy","locations":["Москва"]}`
+	fake := (&routedHTTP{}).
+		route("/about/vacancy/vacancy/", `<html><body><div data-testid="article-content"><p>Body</p></div></body></html>`).
+		route("?page=1", ptsecurityListingPage(`{"vacancies":[{"id":"1","title":null,"vacancies":[`+entry+`,`+entry+`]}],`+
+			`"pagination":{"page":1,"pageSize":20,"pageCount":1,"total":2}}`))
+	jobs, err := NewPtsecurity(fake).Fetch(context.Background(), CompanyEntry{})
+	if err != nil {
+		t.Fatalf("Fetch: %v", err)
+	}
+	if len(jobs) != 1 || jobs[0].ExternalID != "vacancy" {
+		t.Fatalf("jobs = %+v, want the one vacancy", jobs)
+	}
+}
+
+func TestPtsecurityNullAddressAddsNoCountry(t *testing.T) {
+	var p ptsecurityPosting
+	if err := json.Unmarshal([]byte(`{"jobLocation":{"address":null}}`), &p); err != nil {
+		t.Fatalf("Unmarshal: %v", err)
+	}
+	if len(p.JobLocation.Address) != 0 {
+		t.Errorf("Address = %+v, want none for null", p.JobLocation.Address)
 	}
 }

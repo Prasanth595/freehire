@@ -49,9 +49,9 @@ func (tochka) Provider() string { return "tochka" }
 func (tochka) boardless() {}
 
 func (t tochka) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
-	locs, err := sitemapJobLocs(ctx, t.http, tochkaSitemapURL, tochkaSlug)
+	locs, err := t.vacancyLocs(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("tochka: sitemap: %w", err)
+		return nil, err
 	}
 	jobs := fetchDetails(locs, defaultDetailWorkers, func(loc string) (Job, bool) {
 		return t.detail(ctx, e, tochkaSlug(loc))
@@ -62,6 +62,38 @@ func (t tochka) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
 		return nil, fmt.Errorf("tochka: listed %d vacancies and read none of them", len(locs))
 	}
 	return jobs, nil
+}
+
+// vacancyLocs enumerates every vacancy page the sitemap names. Today the sitemap is one flat
+// urlset; should it become an index, every sub-sitemap is followed, and one that fails fails
+// the run — a partial enumeration would have the sweep close the vacancies it skipped. A
+// sitemap naming no vacancy at all is an error too: the site carries dozens, so "none" reads
+// the same as "the sitemap moved", and read as the former it would retire the whole employer.
+func (t tochka) vacancyLocs(ctx context.Context) ([]string, error) {
+	doc, err := getSitemap(ctx, t.http, tochkaSitemapURL)
+	if err != nil {
+		return nil, fmt.Errorf("tochka: sitemap: %w", err)
+	}
+	urls := doc.URLs
+	for _, sm := range doc.Sitemaps {
+		sub, err := getSitemap(ctx, t.http, sm.Loc)
+		if err != nil {
+			return nil, fmt.Errorf("tochka: sitemap %s: %w", sm.Loc, err)
+		}
+		urls = append(urls, sub.URLs...)
+	}
+	var locs []string
+	seen := map[string]bool{}
+	for _, u := range urls {
+		if slug := tochkaSlug(u.Loc); slug != "" && !seen[slug] {
+			seen[slug] = true
+			locs = append(locs, u.Loc)
+		}
+	}
+	if len(locs) == 0 {
+		return nil, fmt.Errorf("tochka: sitemap names no vacancy pages — it moved, or the crawl is being refused")
+	}
+	return locs, nil
 }
 
 // tochkaSlugPattern captures the slug of a vacancy page, /vacancies/catalog/<slug>/. Category
