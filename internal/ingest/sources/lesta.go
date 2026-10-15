@@ -6,6 +6,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	"golang.org/x/net/html"
 
@@ -70,14 +71,25 @@ func (l lesta) FetchNew(ctx context.Context, e CompanyEntry, seen func(externalI
 	if err != nil {
 		return nil, err
 	}
-	return fetchDetails(items, defaultDetailWorkers, func(it lestaItem) (Job, bool) {
+	var wanted, read atomic.Int64
+	jobs := fetchDetails(items, defaultDetailWorkers, func(it lestaItem) (Job, bool) {
 		job := l.listJob(e, it)
 		if seen(job.ExternalID) {
 			job.SeenRefresh = true
 			return job, true
 		}
-		return l.detail(ctx, job)
-	}), nil
+		wanted.Add(1)
+		job, ok := l.detail(ctx, job)
+		if ok {
+			read.Add(1)
+		}
+		return job, ok
+	})
+	// A crawl that listed new postings and read none of them is broken, not quiet.
+	if wanted.Load() > 0 && read.Load() == 0 {
+		return nil, fmt.Errorf("lesta: listed %d new postings and read none of their pages", wanted.Load())
+	}
+	return jobs, nil
 }
 
 // list walks the listing by offset until it has read the total the listing itself reports. A page

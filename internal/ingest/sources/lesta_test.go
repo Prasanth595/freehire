@@ -154,3 +154,11 @@ func TestLestaExperienceMin(t *testing.T) {
 		}
 	}
 }
+
+// Listing new postings and reading none of their pages is a broken crawl, not a quiet one.
+func TestLestaFailsWhenNoNewPostingIsRead(t *testing.T) {
+	f := &lestaFake{json: lestaListing(t)}
+	if _, err := NewLesta(f).Fetch(context.Background(), CompanyEntry{}); err == nil {
+		t.Fatal("want an error when no vacancy page could be read")
+	}
+}

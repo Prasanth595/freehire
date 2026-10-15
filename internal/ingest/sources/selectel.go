@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"sync/atomic"
 
 	"golang.org/x/net/html"
 )
@@ -74,14 +75,25 @@ func (s selectel) FetchNew(ctx context.Context, e CompanyEntry, seen func(extern
 	if err != nil {
 		return nil, err
 	}
-	return fetchDetails(items, defaultDetailWorkers, func(it selectelItem) (Job, bool) {
+	var wanted, read atomic.Int64
+	jobs := fetchDetails(items, defaultDetailWorkers, func(it selectelItem) (Job, bool) {
 		id := strconv.FormatInt(it.ID, 10)
 		url := fmt.Sprintf(selectelVacancyURL, it.ID)
 		if seen(id) {
 			return Job{ExternalID: id, URL: url, Title: it.Title, Company: e.Company, SeenRefresh: true}, true
 		}
-		return s.detail(ctx, e, it)
-	}), nil
+		wanted.Add(1)
+		job, ok := s.detail(ctx, e, it)
+		if ok {
+			read.Add(1)
+		}
+		return job, ok
+	})
+	// A crawl that listed new postings and read none of them is broken, not quiet.
+	if wanted.Load() > 0 && read.Load() == 0 {
+		return nil, fmt.Errorf("selectel: listed %d new postings and read none of their pages", wanted.Load())
+	}
+	return jobs, nil
 }
 
 // list reads the listing page's payload. The site serves every vacancy on page one; a payload

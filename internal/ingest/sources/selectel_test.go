@@ -159,3 +159,11 @@ func TestSelectelListingRefusesATruncatedCatalogue(t *testing.T) {
 		})
 	}
 }
+
+// Listing new postings and reading none of their pages is a broken crawl, not a quiet one.
+func TestSelectelFailsWhenNoNewPostingIsRead(t *testing.T) {
+	f := &selectelFake{pages: map[string]string{selectelListURL: selectelFixture(t, "selectel_list.html")}}
+	if _, err := NewSelectel(f).Fetch(context.Background(), CompanyEntry{}); err == nil {
+		t.Fatal("want an error when no vacancy page could be read")
+	}
+}
