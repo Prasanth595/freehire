@@ -40,6 +40,7 @@ const (
 	techInAsiaSearchURL  = "https://www.techinasia.com/jobs/search"
 	techInAsiaPostingURL = "https://www.techinasia.com/jobs/"
 	techInAsiaReferer    = "https://www.techinasia.com/"
+	techInAsiaAssetBase  = "https://static.techinasia.com/assets/v5/"
 	techInAsiaIndex      = "job_postings"
 	// techInAsiaHitsPerPage is Algolia's per-request ceiling; the whole board fits one page.
 	techInAsiaHitsPerPage = 1000
@@ -49,7 +50,9 @@ const (
 )
 
 var (
-	techInAsiaAssetRE = regexp.MustCompile(`//static\.techinasia\.com/assets/v5/app\.[0-9a-f]{8}\.js`)
+	// techInAsiaAssetRE reads only the bundle's file name; the host it is fetched from is fixed
+	// (techInAsiaAssetBase), never taken from the page.
+	techInAsiaAssetRE = regexp.MustCompile(`/assets/v5/(app\.[0-9a-f]{8}\.js)`)
 	techInAsiaCredsRE = regexp.MustCompile(`apiKey:\s*"([A-Za-z0-9]{16,64})"\s*,\s*appId:\s*"([A-Za-z0-9]{6,16})"`)
 )
 
@@ -225,11 +228,11 @@ func (s techInAsia) creds(ctx context.Context) (techInAsiaCreds, error) {
 	if err != nil {
 		return techInAsiaCreds{}, fmt.Errorf("techinasia: search page: %w", err)
 	}
-	asset := techInAsiaAssetRE.FindString(page)
-	if asset == "" {
+	asset := techInAsiaAssetRE.FindStringSubmatch(page)
+	if asset == nil {
 		return techInAsiaCreds{}, fmt.Errorf("techinasia: search page names no app bundle")
 	}
-	bundle, err := s.http.GetText(ctx, "https:"+asset)
+	bundle, err := s.http.GetText(ctx, techInAsiaAssetBase+asset[1])
 	if err != nil {
 		return techInAsiaCreds{}, fmt.Errorf("techinasia: app bundle: %w", err)
 	}
