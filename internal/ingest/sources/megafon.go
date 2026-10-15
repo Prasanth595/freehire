@@ -40,7 +40,8 @@ const (
 	megafonDetailURL = "https://job.megafon.ru/api/v1/vacancies/%s?cityId=%d"
 	// megafonJobURL is the public posting page: /vacancy/{city}/{sector}/{slug}.
 	megafonJobURL = "https://job.megafon.ru/vacancy/%s/%s/%s"
-	// megafonMaxPages bounds one city's walk as a backstop; pages is the primary stop.
+	// megafonMaxPages is a safety ceiling on one city's walk: reaching it before the city's
+	// own page count fails the crawl.
 	megafonMaxPages = 100
 	// megafonCityWorkers bounds the city walk's in-flight requests.
 	megafonCityWorkers = 4
@@ -184,10 +185,14 @@ func (m megafon) crawl(ctx context.Context) ([]megafonPosting, error) {
 	return postings, nil
 }
 
-// listCity pages one city's listing until its page count or an empty page.
+// listCity pages one city's listing until its page count or an empty page. Reaching the page
+// cap first is a failure, not a result: the postings past it would read as unseen.
 func (m megafon) listCity(ctx context.Context, cityID int) ([]megafonListed, error) {
 	var all []megafonListed
-	for page := 1; page <= megafonMaxPages; page++ {
+	for page := 1; ; page++ {
+		if page > megafonMaxPages {
+			return nil, fmt.Errorf("megafon: city %d: page cap %d reached before the end of the listing", cityID, megafonMaxPages)
+		}
 		var resp struct {
 			Pages     int             `json:"pages"`
 			Vacancies []megafonListed `json:"vacancies"`
@@ -197,10 +202,9 @@ func (m megafon) listCity(ctx context.Context, cityID int) ([]megafonListed, err
 		}
 		all = append(all, resp.Vacancies...)
 		if len(resp.Vacancies) == 0 || page >= resp.Pages {
-			break
+			return all, nil
 		}
 	}
-	return all, nil
 }
 
 // fetchDetail fetches a posting's detail under the first city it is listed in.

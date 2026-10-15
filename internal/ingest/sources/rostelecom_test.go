@@ -150,3 +150,34 @@ func TestRostelecomEmptyListYieldsNoJobs(t *testing.T) {
 		t.Fatalf("got %d jobs, want 0", len(jobs))
 	}
 }
+
+// An empty page before totalPages leaves the listing short of totalCount. Returning what was
+// gathered would let the unseen sweep close the postings the empty page should have held.
+func TestRostelecomShortListingFailsCrawl(t *testing.T) {
+	fake := (&routedHTTP{}).
+		route("page=0&", rostelecomFixture(t, "vacancies_p0.json")).
+		route("page=1&", `{"totalPages":3,"totalCount":6,"vacancies":[]}`)
+	if _, err := NewRostelecom(fake).Fetch(context.Background(), CompanyEntry{Company: "Rostelecom"}); err == nil {
+		t.Fatal("Fetch succeeded with a listing short of totalCount")
+	}
+}
+
+// A page repeating ids already read does not count toward totalCount: distinct ids do.
+func TestRostelecomRepeatedPageFailsCrawl(t *testing.T) {
+	fake := (&routedHTTP{}).
+		route("page=0&", rostelecomFixture(t, "vacancies_p0.json")).
+		route("page=1&", rostelecomFixture(t, "vacancies_p0.json")).
+		route("page=2&", rostelecomFixture(t, "vacancies_p0.json"))
+	if _, err := NewRostelecom(fake).Fetch(context.Background(), CompanyEntry{Company: "Rostelecom"}); err == nil {
+		t.Fatal("Fetch succeeded with 3 distinct ids against totalCount 6")
+	}
+}
+
+func TestRostelecomPageCapFailsCrawl(t *testing.T) {
+	fake := (&routedHTTP{}).route("page=",
+		`{"totalPages":1000,"totalCount":1000,"vacancies":[{"id":1,"name":"x"}]}`)
+	_, err := NewRostelecom(fake).Fetch(context.Background(), CompanyEntry{Company: "Rostelecom"})
+	if err == nil || !strings.Contains(err.Error(), "page cap") {
+		t.Fatalf("err = %v, want a page-cap failure", err)
+	}
+}

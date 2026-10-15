@@ -23,7 +23,7 @@ const (
 	// /vacancy/[vacancyId]; the plural /vacancies/{id} 404s.
 	rostelecomJobURL  = "https://job.rt.ru/vacancy/%d"
 	rostelecomPerPage = 100
-	// rostelecomMaxPages bounds the walk as a backstop; totalPages is the primary stop.
+	// rostelecomMaxPages is a safety ceiling: reaching it before totalPages fails the crawl.
 	rostelecomMaxPages = 50
 )
 
@@ -73,22 +73,40 @@ func (r rostelecom) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
 	return jobs, nil
 }
 
-// list pages through every vacancy until totalPages. Any page failing fails the crawl: a
-// silently short listing would read as closed postings to the unseen sweep.
+// list pages through every vacancy until totalPages, deduplicating by id across pages. The
+// crawl must PROVE it read the whole listing, because a short one reads as closed postings to
+// the unseen sweep: any page failing, the page cap reached before the last page, or fewer
+// distinct ids than the reply's own totalCount (a page that came back empty or overlapping)
+// all fail the crawl rather than return what was gathered.
 func (r rostelecom) list(ctx context.Context) ([]rostelecomVacancy, error) {
 	var all []rostelecomVacancy
-	for page := 0; page < rostelecomMaxPages; page++ {
+	seen := map[int]bool{}
+	totalCount := 0
+	for page := 0; ; page++ {
+		if page >= rostelecomMaxPages {
+			return nil, fmt.Errorf("rostelecom: page cap %d reached before the end of the listing", rostelecomMaxPages)
+		}
 		var resp struct {
 			TotalPages int                 `json:"totalPages"`
+			TotalCount int                 `json:"totalCount"`
 			Vacancies  []rostelecomVacancy `json:"vacancies"`
 		}
 		if err := r.http.GetJSON(ctx, fmt.Sprintf(rostelecomListURL, page, rostelecomPerPage), &resp); err != nil {
 			return nil, fmt.Errorf("rostelecom: list page %d: %w", page, err)
 		}
-		all = append(all, resp.Vacancies...)
+		totalCount = max(totalCount, resp.TotalCount)
+		for _, v := range resp.Vacancies {
+			if !seen[v.ID] {
+				seen[v.ID] = true
+				all = append(all, v)
+			}
+		}
 		if len(resp.Vacancies) == 0 || page+1 >= resp.TotalPages {
 			break
 		}
+	}
+	if len(all) < totalCount {
+		return nil, fmt.Errorf("rostelecom: listing yielded %d distinct postings, totalCount says %d", len(all), totalCount)
 	}
 	return all, nil
 }

@@ -306,3 +306,14 @@ func TestMegafonDetailSalary(t *testing.T) {
 		t.Errorf("no salary stated, got %v %q", none.SalaryMin, none.SalaryCurrency)
 	}
 }
+
+// A city whose listing outruns the page cap fails the crawl rather than return the pages read.
+func TestMegafonPageCapFailsCrawl(t *testing.T) {
+	fake := (&routedHTTP{}).
+		route("/cities/available", `{"cities":[{"id":7,"title":"Тверь","slug":"tver"}]}`).
+		route("cities=7&page=", `{"page":1,"pages":1000,"total":10000,"vacancies":[{"id":1,"slug":"x-1","title":"x","city":{"id":7,"title":"Тверь","slug":"tver"}}]}`)
+	_, err := NewMegafon(fake).Fetch(context.Background(), CompanyEntry{Company: "MegaFon"})
+	if err == nil || !strings.Contains(err.Error(), "page cap") {
+		t.Fatalf("err = %v, want a page-cap failure", err)
+	}
+}
