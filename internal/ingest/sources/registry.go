@@ -429,6 +429,10 @@ func All(c HTTPClient) map[string]Source {
 		NewMtslink(c),
 		NewTBank(c),
 		NewMTS(c),
+		// MegaFon walks its listing city by city (the unfiltered feed's order is unstable and
+		// deterministically hides ~14% of postings) and hydrates bodies; see megafon.go.
+		NewMegafon(c),
+		NewRostelecom(c),
 		NewVK(c),
 		NewTwoGIS(c),
 	)
