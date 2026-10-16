@@ -5,7 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
-	"reflect"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -370,8 +370,10 @@ func TestTheAppMarketStatsRunsTheSameFilterTheWebsiteRuns(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MarketStats: %v", err)
 	}
-	if !reflect.DeepEqual(facets.got.Filter, search.FilterFromValues(in.QueryValues())) {
-		t.Errorf("filter = %#v, want the one search_jobs would run", facets.got.Filter)
+	// FilterFromValues builds its groups from a map, so their ORDER varies between runs; the
+	// set of groups is what has to match.
+	if got, want := filterGroups(t, facets.got.Filter), filterGroups(t, search.FilterFromValues(in.QueryValues())); !slices.Equal(got, want) {
+		t.Errorf("filter groups = %v, want the ones search_jobs would run: %v", got, want)
 	}
 	if got.Total != 42 || len(got.Facets["skills"]) != 1 {
 		t.Errorf("answer = %+v, want the total and the skills distribution", got)
@@ -382,4 +384,19 @@ func TestTheAppMarketStatsRefusesWithoutAFacetBackend(t *testing.T) {
 	if _, err := mcpappUnder(&fakeSearcher{}, nil, fakeOJCPStore{}).MarketStats(context.Background(), mcpapp.SearchInput{}); err == nil {
 		t.Error("no facet backend answered as an empty market")
 	}
+}
+
+// filterGroups renders a search filter as its sorted groups, each group's clauses joined.
+func filterGroups(t *testing.T, filter any) []string {
+	t.Helper()
+	groups, ok := filter.([][]string)
+	if !ok {
+		t.Fatalf("filter is %T, want [][]string", filter)
+	}
+	out := make([]string, len(groups))
+	for i, g := range groups {
+		out[i] = strings.Join(g, " OR ")
+	}
+	slices.Sort(out)
+	return out
 }
