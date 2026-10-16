@@ -106,7 +106,8 @@ func (p Projector) JobDetail(j jobview.Job, form *applyform.Form) JobResult {
 	out.LastSeenAt = deref(j.LastSeenAt)
 	if j.Reality != nil {
 		out.Reality = j.Reality.Class
-		out.FakeFreshness = j.Reality.IsFakeFreshness
+		fake := j.Reality.IsFakeFreshness
+		out.FakeFreshness = &fake
 	}
 	// Ghost is nil at level none, which is most of the catalogue, so absence on the wire
 	// already says "nothing observed".

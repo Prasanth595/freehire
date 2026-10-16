@@ -100,9 +100,11 @@ type JobResult struct {
 	// They are flat like the rest of this shape, and the ghost criteria travel with the
 	// level, because internal/job/ghost states facts about a posting, never an accusation
 	// about an employer — a level without its criteria would be exactly that.
-	LastSeenAt    string   `json:"last_seen_at,omitempty" jsonschema:"RFC3339 UTC; when a re-crawl last confirmed the posting live on its source"`
-	Reality       string   `json:"reality,omitempty" jsonschema:"fresh, stale or likely-evergreen: whether the posting looks like a live opening, judged from its age and repost history"`
-	FakeFreshness bool     `json:"fake_freshness,omitempty" jsonschema:"true when the posted date is recent but freehire has seen the posting for 90 days or more"`
+	LastSeenAt string `json:"last_seen_at,omitempty" jsonschema:"RFC3339 UTC; when a re-crawl last confirmed the posting live on its source"`
+	Reality    string `json:"reality,omitempty" jsonschema:"fresh, stale or likely-evergreen: whether the posting looks like a live opening, judged from its age and repost history"`
+	// FakeFreshness is a pointer for the reason the salary fields are: once reality was
+	// computed, a computed false must reach the wire, distinct from a lookup that failed.
+	FakeFreshness *bool    `json:"fake_freshness,omitempty" jsonschema:"true when the posted date is recent but freehire has seen the posting for 90 days or more; present whenever reality is"`
 	GhostLevel    string   `json:"ghost_level,omitempty" jsonschema:"possible or likely: observed signs that the posting is not being actively filled; absent when there is too little evidence"`
 	GhostCriteria []string `json:"ghost_criteria,omitempty" jsonschema:"the signs behind ghost_level: evergreen_posting, ats_absent (gone from the employer's own board), silent_applications, user_reports"`
 }

@@ -283,7 +283,7 @@ func TestDetailStatesTheLivenessSignalsItWasHanded(t *testing.T) {
 	if got.LastSeenAt != seen {
 		t.Errorf("last_seen_at = %q, want %q", got.LastSeenAt, seen)
 	}
-	if got.Reality != "likely-evergreen" || !got.FakeFreshness {
+	if got.Reality != "likely-evergreen" || got.FakeFreshness == nil || !*got.FakeFreshness {
 		t.Errorf("reality = %q, fake_freshness = %v; want likely-evergreen, true", got.Reality, got.FakeFreshness)
 	}
 	if got.GhostLevel != "possible" || !slices.Equal(got.GhostCriteria, []string{"evergreen_posting", "ats_absent"}) {
@@ -305,5 +305,20 @@ func TestDetailClaimsNothingWhereNoSignalWasComputed(t *testing.T) {
 		if strings.Contains(string(raw), field) {
 			t.Errorf("%s is on the wire though nothing was computed: %s", field, raw)
 		}
+	}
+}
+
+func TestAComputedFalseFreshnessFlagIsStatedNotDropped(t *testing.T) {
+	// Absent means "not computed". Once reality WAS computed, a false flag is an answer and
+	// must reach the wire — otherwise a clean result and a failed lookup look the same.
+	j := aJob(t)
+	j.Reality = &jobview.Reality{Class: "fresh", IsFakeFreshness: false}
+
+	raw, err := json.Marshal(NewProjector(testOrigin).JobDetail(j, nil))
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+	if !strings.Contains(string(raw), `"fake_freshness":false`) {
+		t.Errorf("a computed false was dropped from the wire: %s", raw)
 	}
 }
