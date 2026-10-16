@@ -5,6 +5,7 @@ import (
 	"errors"
 	"io"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -283,5 +284,102 @@ func TestTheAppOpenCheckFailsRatherThanCallingEverythingMissing(t *testing.T) {
 	store := fakeOJCPStore{livenessErr: errors.New("db down")}
 	if _, err := mcpappUnder(&fakeSearcher{}, nil, store).CheckJobsOpen(context.Background(), []string{"x"}); err == nil {
 		t.Error("a failed lookup answered as a result")
+	}
+}
+
+func TestTheAppSimilarJobsRefusesAnUnpublishedPostingLikeAnAbsentOne(t *testing.T) {
+	// Answering a private slug with its neighbours while an unknown slug answers not found
+	// would tell an anonymous caller the private posting exists.
+	store := fakeOJCPStore{job: db.Job{ID: 1, PublicSlug: "x", IsPrivate: true}, similarIDs: []int64{2}}
+	_, err := mcpappUnder(&fakeSearcher{}, nil, store).SimilarJobs(context.Background(), "x", 6)
+
+	var notFound mcpapp.NotFoundError
+	if !errors.As(err, &notFound) {
+		t.Fatalf("err = %v, want not found", err)
+	}
+}
+
+func TestTheAppSimilarJobsShowsOnlyWhatTheAppWouldShowNearestFirst(t *testing.T) {
+	// The website drops closed and private neighbours; the app also drops duplicates, as
+	// every one of its tools does.
+	store := fakeOJCPStore{
+		job:        db.Job{ID: 1, PublicSlug: "x", Title: "Go Dev", Company: "Acme"},
+		similarIDs: []int64{5, 4, 3, 2},
+		jobsByID: []db.Job{
+			{ID: 2, PublicSlug: "open-far", Title: "B", Company: "Acme"},
+			{ID: 3, PublicSlug: "dup", Title: "C", Company: "Acme", DuplicateOf: pgtype.Int8{Int64: 2, Valid: true}},
+			{ID: 4, PublicSlug: "closed", Title: "D", Company: "Acme", ClosedAt: pgtype.Timestamptz{Time: time.Now(), Valid: true}},
+			{ID: 5, PublicSlug: "open-near", Title: "E", Company: "Acme"},
+		},
+	}
+
+	got, err := mcpappUnder(&fakeSearcher{}, nil, store).SimilarJobs(context.Background(), "x", 6)
+	if err != nil {
+		t.Fatalf("SimilarJobs: %v", err)
+	}
+	var slugs []string
+	for _, j := range got.Jobs {
+		slugs = append(slugs, j.Slug)
+	}
+	if strings.Join(slugs, ",") != "open-near,open-far" {
+		t.Errorf("neighbours = %v, want only the open ones, nearest first", slugs)
+	}
+}
+
+func TestTheAppSalaryStatsScopesTheWayTheInsightsPageDoes(t *testing.T) {
+	var asked db.ListInsightsSalaryParams
+	store := fakeOJCPStore{
+		salary:       []db.ListInsightsSalaryRow{{Currency: "EUR", Period: "year", SampleSize: 80, P25: 60000, P50: 70000, P75: 85000}},
+		salaryParams: &asked,
+	}
+
+	got, err := mcpappUnder(&fakeSearcher{}, nil, store).SalaryStats(context.Background(),
+		mcpapp.SalaryInput{Category: "backend", Seniority: "senior", Country: "DE"})
+	if err != nil {
+		t.Fatalf("SalaryStats: %v", err)
+	}
+	if asked != (db.ListInsightsSalaryParams{Category: "backend", Seniority: "senior", Country: "de"}) {
+		t.Errorf("rollup asked for %+v, want backend/senior/de", asked)
+	}
+	if len(got.Bands) != 1 || got.Bands[0].P50 != 70000 || got.Bands[0].Seniority != "senior" {
+		t.Errorf("bands = %+v, want the one EUR band carrying its seniority", got.Bands)
+	}
+}
+
+func TestTheAppSalaryStatsBreaksACategoryDownBySeniority(t *testing.T) {
+	store := fakeOJCPStore{salaryByCat: []db.ListInsightsSalaryByCategoryRow{
+		{Seniority: "", Currency: "USD", Period: "year", SampleSize: 300, P50: 150000},
+		{Seniority: "senior", Currency: "USD", Period: "year", SampleSize: 120, P50: 175000},
+	}}
+	got, err := mcpappUnder(&fakeSearcher{}, nil, store).SalaryStats(context.Background(), mcpapp.SalaryInput{Category: "backend"})
+	if err != nil {
+		t.Fatalf("SalaryStats: %v", err)
+	}
+	if len(got.Bands) != 2 || got.Bands[1].Seniority != "senior" {
+		t.Errorf("bands = %+v, want the category-wide band and the senior one", got.Bands)
+	}
+}
+
+func TestTheAppMarketStatsRunsTheSameFilterTheWebsiteRuns(t *testing.T) {
+	facets := &fakeFacetCounter{res: search.FacetResult{Total: 42, Facets: map[string]map[string]int64{"skills": {"go": 42}}}}
+	h := mcpappUnder(&fakeSearcher{}, nil, fakeOJCPStore{})
+	h.facets = facets
+
+	in := mcpapp.SearchInput{Skills: []string{"go"}, WorkMode: []string{"remote"}}
+	got, err := h.MarketStats(context.Background(), in)
+	if err != nil {
+		t.Fatalf("MarketStats: %v", err)
+	}
+	if !reflect.DeepEqual(facets.got.Filter, search.FilterFromValues(in.QueryValues())) {
+		t.Errorf("filter = %#v, want the one search_jobs would run", facets.got.Filter)
+	}
+	if got.Total != 42 || len(got.Facets["skills"]) != 1 {
+		t.Errorf("answer = %+v, want the total and the skills distribution", got)
+	}
+}
+
+func TestTheAppMarketStatsRefusesWithoutAFacetBackend(t *testing.T) {
+	if _, err := mcpappUnder(&fakeSearcher{}, nil, fakeOJCPStore{}).MarketStats(context.Background(), mcpapp.SearchInput{}); err == nil {
+		t.Error("no facet backend answered as an empty market")
 	}
 }
