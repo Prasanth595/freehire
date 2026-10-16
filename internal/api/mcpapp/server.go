@@ -36,6 +36,11 @@ const (
 	toolGetJob          = "get_job"
 	toolSearchCompanies = "search_companies"
 	toolGetCompany      = "get_company"
+	toolCheckJobsOpen   = "check_jobs_open"
+	// search and fetch are fixed names: ChatGPT's deep-research and company-knowledge
+	// connectors look for exactly these.
+	toolSearch = "search"
+	toolFetch  = "fetch"
 )
 
 // readOnly is every tool's annotation block, written once.
@@ -128,6 +133,42 @@ func newServer(r Reader) *mcp.Server {
 		Annotations: readOnly(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CompanyDetailInput) (*mcp.CallToolResult, CompanyResult, error) {
 		return toolResult(r.CompanyDetail(ctx, in.Slug))
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:  toolCheckJobsOpen,
+		Title: "Check whether postings are still open",
+		Description: "Check whether postings are still open, by the slugs search results carry — " +
+			"up to 50 per call. Use before acting on a saved shortlist: each posting answers " +
+			"open, closed or not_found, with when it closed or was last seen live.",
+		Annotations: readOnly(),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in CheckJobsOpenInput) (*mcp.CallToolResult, JobsOpenResult, error) {
+		check, unchecked := openCheckSlugs(in.Slugs)
+		states, err := r.CheckJobsOpen(ctx, check)
+		return toolResult(JobsOpenResult{Jobs: states, Unchecked: unchecked}, err)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:  toolSearch,
+		Title: "Search jobs (research)",
+		Description: "Search freehire's IT job postings by free text and return matching " +
+			"postings as {id, title, url}; read one in full with fetch. For filtered searches " +
+			"prefer search_jobs.",
+		Annotations: readOnly(),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ResearchQuery) (*mcp.CallToolResult, ResearchResults, error) {
+		found, err := r.SearchJobs(ctx, SearchInput{Query: in.Query})
+		return toolResult(researchResults(found), err)
+	})
+
+	mcp.AddTool(server, &mcp.Tool{
+		Name:  toolFetch,
+		Title: "Read one job posting (research)",
+		Description: "Read one posting in full by an id search returned: its full text, " +
+			"the employer, the board it came from and whether it still looks live.",
+		Annotations: readOnly(),
+	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ResearchID) (*mcp.CallToolResult, ResearchDocument, error) {
+		job, err := r.JobDetail(ctx, in.ID)
+		return toolResult(researchDocument(job), err)
 	})
 
 	return server

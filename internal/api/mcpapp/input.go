@@ -79,6 +79,20 @@ type JobDetailInput struct {
 	Slug string `json:"slug" jsonschema:"the posting's identifier, as carried by a search result's slug"`
 }
 
+type CheckJobsOpenInput struct {
+	Slugs []string `json:"slugs" jsonschema:"posting identifiers, as carried by search results' slug; up to 50 are checked per call"`
+}
+
+// ResearchQuery and ResearchID are the inputs of search and fetch, whose shapes ChatGPT's
+// deep-research and company-knowledge connectors fix: one query string in, one id in.
+type ResearchQuery struct {
+	Query string `json:"query" jsonschema:"free text describing the jobs to find"`
+}
+
+type ResearchID struct {
+	ID string `json:"id" jsonschema:"a result id from search"`
+}
+
 type CompanyDetailInput struct {
 	Slug string `json:"slug" jsonschema:"the employer's identifier, as carried by a result's company_slug"`
 }

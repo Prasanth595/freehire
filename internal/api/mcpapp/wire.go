@@ -146,3 +146,65 @@ type CompanyResult struct {
 	Industries []string `json:"industries,omitempty"`
 	HQCountry  string   `json:"hq_country,omitempty" jsonschema:"ISO 3166-1 alpha-2 code"`
 }
+
+// Posting states check_jobs_open answers with.
+const (
+	StatusOpen     = "open"
+	StatusClosed   = "closed"
+	StatusNotFound = "not_found"
+)
+
+// JobOpenState is one posting's answer to "is it still up?".
+//
+// not_found covers a slug that never existed AND one this surface refuses (private, or a
+// duplicate of another posting) — the same indistinguishability get_job keeps, because
+// whether a private posting exists under some slug is not an anonymous caller's business.
+type JobOpenState struct {
+	Slug       string `json:"slug"`
+	Status     string `json:"status" jsonschema:"open, closed or not_found"`
+	ClosedAt   string `json:"closed_at,omitempty" jsonschema:"RFC3339 UTC; when freehire saw the posting close"`
+	LastSeenAt string `json:"last_seen_at,omitempty" jsonschema:"RFC3339 UTC; when a re-crawl last confirmed the posting live"`
+}
+
+// JobsOpenResult is what check_jobs_open answers.
+type JobsOpenResult struct {
+	Jobs []JobOpenState `json:"jobs"`
+	// Unchecked names the slugs past the per-call cap. A long shortlist is neither refused
+	// nor silently cut: the model can say what is left and ask again.
+	Unchecked []string `json:"unchecked,omitempty" jsonschema:"slugs beyond the per-call cap, not checked; call again with these"`
+}
+
+// The deep-research shapes. ChatGPT's deep-research and company-knowledge connectors call a
+// tool named `search` and one named `fetch` and read their answers in these fixed shapes; a
+// server without them is skipped by those modes entirely. They are thin adaptations of
+// search_jobs and get_job, not a second catalogue view.
+type ResearchResults struct {
+	Results []ResearchHit `json:"results"`
+}
+
+type ResearchHit struct {
+	ID    string `json:"id" jsonschema:"pass to fetch"`
+	Title string `json:"title"`
+	URL   string `json:"url"`
+}
+
+type ResearchDocument struct {
+	ID       string           `json:"id"`
+	Title    string           `json:"title"`
+	Text     string           `json:"text"`
+	URL      string           `json:"url"`
+	Metadata ResearchMetadata `json:"metadata"`
+}
+
+// ResearchMetadata carries attribution and the liveness verdict alongside the text: a
+// research report that quotes a posting without its board reads as though freehire were the
+// employer.
+type ResearchMetadata struct {
+	Company        string `json:"company"`
+	Location       string `json:"location,omitempty"`
+	Source         string `json:"source"`
+	OfficialJobURL string `json:"official_job_url,omitempty"`
+	PostedAt       string `json:"posted_at,omitempty"`
+	Reality        string `json:"reality,omitempty"`
+	GhostLevel     string `json:"ghost_level,omitempty"`
+}

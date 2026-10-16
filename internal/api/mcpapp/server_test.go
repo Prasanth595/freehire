@@ -56,6 +56,13 @@ func readerThatFinds(t *testing.T) fakeReader {
 		companyDetail: func(context.Context, string) (CompanyResult, error) {
 			return CompanyResult{CompanySummary: CompanySummary{Slug: "acme", Name: "Acme"}}, nil
 		},
+		checkJobsOpen: func(_ context.Context, slugs []string) ([]JobOpenState, error) {
+			out := make([]JobOpenState, 0, len(slugs))
+			for _, s := range slugs {
+				out = append(out, JobOpenState{Slug: s, Status: StatusOpen})
+			}
+			return out, nil
+		},
 	}
 }
 
@@ -74,6 +81,9 @@ func TestEveryAdvertisedToolCanActuallyBeCalled(t *testing.T) {
 		toolGetJob:          {"slug": "senior-go-engineer-acme-abc123"},
 		toolSearchCompanies: {"query": "acme"},
 		toolGetCompany:      {"slug": "acme"},
+		toolCheckJobsOpen:   {"slugs": []string{"senior-go-engineer-acme-abc123"}},
+		toolSearch:          {"query": "go"},
+		toolFetch:           {"id": "senior-go-engineer-acme-abc123"},
 	}
 
 	listed, err := session.ListTools(ctx, nil)
@@ -105,7 +115,7 @@ func TestEveryAdvertisedToolCanActuallyBeCalled(t *testing.T) {
 
 func TestEveryToolDeclaresWhatItDoesAndWhatItDoesNotTouch(t *testing.T) {
 	// Incorrect annotation of these three hints is a named rejection reason in OpenAI's own
-	// submission guidelines. All four tools read; none writes; all reach a catalogue that
+	// submission guidelines. Every tool reads; none writes; all reach a catalogue that
 	// changes outside the conversation.
 	//
 	// The test walks the REGISTERED tools rather than a list written beside it, so a fifth
