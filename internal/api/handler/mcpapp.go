@@ -229,20 +229,22 @@ func (h *mcpappHandlers) CheckJobsOpen(ctx context.Context, slugs []string) ([]m
 
 	out := make([]mcpapp.JobOpenState, 0, len(slugs))
 	for _, slug := range slugs {
-		row, ok := bySlug[slug]
-		state := mcpapp.JobOpenState{Slug: slug, Status: mcpapp.StatusNotFound}
-		switch {
-		case !ok, row.IsPrivate, row.DuplicateOf.Valid:
-		case row.ClosedAt.Valid:
-			state.Status = mcpapp.StatusClosed
-			state.ClosedAt = utcRFC3339(row.ClosedAt)
-		default:
-			state.Status = mcpapp.StatusOpen
-			state.LastSeenAt = utcRFC3339(row.LastSeenAt)
-		}
-		out = append(out, state)
+		row, found := bySlug[slug]
+		out = append(out, jobOpenState(slug, row, found))
 	}
 	return out, nil
+}
+
+// jobOpenState is one slug's answer. found is false for a slug the lookup did not return.
+func jobOpenState(slug string, row db.ListJobLivenessBySlugsRow, found bool) mcpapp.JobOpenState {
+	switch {
+	case !found || row.IsPrivate || row.DuplicateOf.Valid:
+		return mcpapp.JobOpenState{Slug: slug, Status: mcpapp.StatusNotFound}
+	case row.ClosedAt.Valid:
+		return mcpapp.JobOpenState{Slug: slug, Status: mcpapp.StatusClosed, ClosedAt: utcRFC3339(row.ClosedAt)}
+	default:
+		return mcpapp.JobOpenState{Slug: slug, Status: mcpapp.StatusOpen, LastSeenAt: utcRFC3339(row.LastSeenAt)}
+	}
 }
 
 // utcRFC3339 renders a nullable timestamp the way every timestamp on this surface reads, or
