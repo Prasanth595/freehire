@@ -89,6 +89,14 @@ OJCP surface uses). A search result carries only `first_seen_at`.
   `JobDetail` (`research.go`); they are not a second catalogue view and add nothing to the
   `Reader`.
 
+## Descriptions say what a tool returns, never which tool to call
+
+Anthropic's directory policy rules out tool descriptions that instruct the model about other
+tools ("call get_job for the full text" was in three places). A tool or field description
+states what comes back; cross-tool guidance, where needed, goes in `serverInstructions`.
+`TestNoToolDescriptionDirectsTheModelToAnotherTool` walks the registered tools and both
+schemas to hold the line.
+
 ## Annotations are load-bearing
 
 Every tool declares `readOnlyHint: true`, `destructiveHint: false`, `openWorldHint: true`.

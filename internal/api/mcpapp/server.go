@@ -95,7 +95,7 @@ func newServer(r Reader) *mcp.Server {
 		Title: "Search jobs",
 		Description: "Search freehire's catalogue of IT job postings. Use for any question " +
 			"about which jobs are open — by technology, seniority, location, pay or employer. " +
-			"Returns a short preview of each posting; call get_job for one posting's full text.",
+			"Returns a short preview of each posting.",
 		Annotations: readOnly(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in SearchInput) (*mcp.CallToolResult, SearchJobsResult, error) {
 		return toolResult(r.SearchJobs(ctx, in))
@@ -151,9 +151,8 @@ func newServer(r Reader) *mcp.Server {
 	mcp.AddTool(server, &mcp.Tool{
 		Name:  toolSearch,
 		Title: "Search jobs (research)",
-		Description: "Search freehire's IT job postings by free text and return matching " +
-			"postings as {id, title, url}; read one in full with fetch. For filtered searches " +
-			"prefer search_jobs.",
+		Description: "Search freehire's IT job postings by free text. Returns matching postings " +
+			"as {id, title, url}.",
 		Annotations: readOnly(),
 	}, func(ctx context.Context, _ *mcp.CallToolRequest, in ResearchQuery) (*mcp.CallToolResult, ResearchResults, error) {
 		found, err := r.SearchJobs(ctx, SearchInput{Query: in.Query})
