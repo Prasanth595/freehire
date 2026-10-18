@@ -8,7 +8,9 @@ import (
 )
 
 type fakeRepo struct {
-	candidates  []Candidate
+	candidates  []Candidate // TierTech
+	beyond      []Candidate // TierBeyondTech
+	tiersAsked  []Tier
 	closed      []Candidate
 	companies   []Candidate
 	sentToday   int64
@@ -27,7 +29,11 @@ func take(all []Candidate, limit int32) []Candidate {
 	return all
 }
 
-func (f *fakeRepo) JobsToPing(_ context.Context, _ string, limit int32) ([]Candidate, error) {
+func (f *fakeRepo) JobsToPing(_ context.Context, _ string, tier Tier, limit int32) ([]Candidate, error) {
+	f.tiersAsked = append(f.tiersAsked, tier)
+	if tier == TierBeyondTech {
+		return take(f.beyond, limit), nil
+	}
 	f.listLimit = limit
 	return take(f.candidates, limit), nil
 }
@@ -93,6 +99,18 @@ func pick(t *testing.T, reports []Report, engine string, kind Kind) Report {
 		}
 	}
 	t.Fatalf("no report for %s/%s in %d reports", engine, kind, len(reports))
+	return Report{}
+}
+
+// pickTier is pick for a new-posting pass, which runs once per tier.
+func pickTier(t *testing.T, reports []Report, engine string, tier Tier) Report {
+	t.Helper()
+	for _, r := range reports {
+		if r.Engine == engine && r.Kind == KindCreated && r.Tier == tier {
+			return r
+		}
+	}
+	t.Fatalf("no report for %s/created/%s in %d reports", engine, tier, len(reports))
 	return Report{}
 }
 
@@ -447,5 +465,82 @@ func TestPostingsStillTakeTheBudgetBeforeCompanies(t *testing.T) {
 
 	if got := pick(t, reports, "google", KindCreated).Recorded; got != 3 {
 		t.Fatalf("created recorded %d, want the 3 left of the day", got)
+	}
+}
+
+// The owner's rule for the scarce engine: Google's day goes to technical postings first,
+// and the catalogue beyond IT gets only what that left. With five calls left and ten
+// technical postings waiting, the second tier is not even asked.
+func TestTechnicalPostingsTakeTheBudgetBeforeTheRest(t *testing.T) {
+	repo := &fakeRepo{candidates: candidates(10), beyond: candidates(10), sentToday: 195}
+	engine := &fakeEngine{name: "google", budget: 200, accept: 10}
+
+	reports := New(repo, "https://freehire.me", engine).Run(context.Background(), 50)
+
+	if got := pickTier(t, reports, "google", TierTech).Recorded; got != 5 {
+		t.Fatalf("technical recorded %d, want the 5 left of the day", got)
+	}
+	beyond := pickTier(t, reports, "google", TierBeyondTech)
+	if beyond.Offered != 0 {
+		t.Fatalf("beyond-tech offered %d, want 0 — the day went to technical postings", beyond.Offered)
+	}
+	for _, tier := range repo.tiersAsked {
+		if tier == TierBeyondTech {
+			t.Fatal("the beyond-tech tier was queried with no budget left for it")
+		}
+	}
+}
+
+// What the technical tier leaves goes to the rest of the catalogue, and only then to
+// closures — new postings of either tier still come before any closure.
+func TestTheRestOfTheCatalogueGetsWhatTechnicalPostingsLeave(t *testing.T) {
+	repo := &fakeRepo{candidates: candidates(2), beyond: candidates(10), closed: candidates(10), sentToday: 195}
+	engine := &fakeEngine{name: "google", budget: 200, accept: 10}
+
+	reports := New(repo, "https://freehire.me", engine).Run(context.Background(), 50)
+
+	if got := pickTier(t, reports, "google", TierTech).Recorded; got != 2 {
+		t.Fatalf("technical recorded %d, want 2", got)
+	}
+	if got := pickTier(t, reports, "google", TierBeyondTech).Recorded; got != 3 {
+		t.Fatalf("beyond-tech recorded %d, want the 3 the technical tier left", got)
+	}
+	if got := pick(t, reports, "google", KindClosed).Offered; got != 0 {
+		t.Fatalf("closures offered %d, want 0 — new postings of both tiers come first", got)
+	}
+	// Both tiers are the same event in the ledger: the tier orders the passes, it is
+	// not something an engine was told.
+	for i, kind := range repo.recordedAs {
+		if kind != KindCreated {
+			t.Fatalf("recorded[%d] as %s, want created", i, kind)
+		}
+	}
+}
+
+// An unbounded engine is not rationed by the tier order: IndexNow hears about both
+// halves of the catalogue every run, a full batch each.
+func TestUnboundedEngineAnnouncesBothTiers(t *testing.T) {
+	repo := &fakeRepo{candidates: candidates(10), beyond: candidates(10)}
+	engine := &fakeEngine{name: "indexnow", accept: 10}
+
+	reports := New(repo, "https://freehire.me", engine).Run(context.Background(), 10)
+
+	if got := pickTier(t, reports, "indexnow", TierTech).Recorded; got != 10 {
+		t.Fatalf("technical recorded %d, want 10", got)
+	}
+	if got := pickTier(t, reports, "indexnow", TierBeyondTech).Recorded; got != 10 {
+		t.Fatalf("beyond-tech recorded %d, want a full batch of its own", got)
+	}
+}
+
+// Only a new-posting pass carries a tier; a closure or a company page is not split.
+func TestOnlyNewPostingPassesCarryATier(t *testing.T) {
+	repo := &fakeRepo{closed: candidates(1), companies: candidates(1)}
+	engine := &fakeEngine{name: "indexnow", accept: 10}
+
+	for _, r := range New(repo, "https://freehire.me", engine).Preview(context.Background(), 10) {
+		if (r.Kind == KindCreated) != (r.Tier != "") {
+			t.Fatalf("%s/%s carries tier %q", r.Engine, r.Kind, r.Tier)
+		}
 	}
 }

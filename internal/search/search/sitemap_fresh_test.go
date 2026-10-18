@@ -64,8 +64,8 @@ func TestListFreshSitemapPageSortsNewestFirst(t *testing.T) {
 // The fresh reader must narrow to exactly the population the paged sub-sitemap
 // serves. Asserting against jobSitemapFilter itself rather than against a copy of its
 // text is deliberate: a literal would keep passing if the shared filter gained a
-// predicate and this reader did not, which is the drift that would put a non-tech
-// posting in front of a crawler.
+// predicate and this reader did not, which is the drift that would put a posting the
+// paged sitemap refuses in front of a crawler.
 func TestListFreshSitemapPageUsesTheSharedFilter(t *testing.T) {
 	p := newMeiliSearchProbe(t, nil)
 	c := NewClient(p.srv.URL, "key")
