@@ -107,9 +107,12 @@ func TestCategoryUnresolved(t *testing.T) {
 		// craft, but the facet reaches it, so it stays searchable.
 		{"no category, but the title names a people manager", db.Job{Title: "General Manager", IsTech: pgtype.Bool{Valid: true, Bool: false}}, false},
 		{"no category, Russian head of department", db.Job{Title: "Начальник отдела кадров"}, false},
-		// A manager title with no marker and no craft is reached by nothing.
-		{"no category, manager title with no people marker", db.Job{Title: "Case Manager", IsTech: pgtype.Bool{Valid: true, Bool: false}}, true},
-		{"no category, bare manager", db.Job{Title: "Manager"}, true},
+		// A manager title with no marker and no craft is reached by no facet, but it is
+		// kept for keyword search (classify.NamesManager).
+		{"no category, manager title with no people marker", db.Job{Title: "Case Manager", IsTech: pgtype.Bool{Valid: true, Bool: false}}, false},
+		{"no category, bare manager", db.Job{Title: "Manager"}, false},
+		{"no category, bare Russian manager", db.Job{Title: "Менеджер"}, false},
+		{"no category, the word inside another word is not a manager", db.Job{Title: "Managerial Accountant Trainee"}, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
