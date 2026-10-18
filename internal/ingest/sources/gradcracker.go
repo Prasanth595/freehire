@@ -182,7 +182,11 @@ func (g gradcracker) list(ctx context.Context) ([]gradcrackerCard, error) {
 				return nil, fmt.Errorf("gradcracker: listing %s page %d: %w", d, page, err)
 			}
 			if page == 1 {
-				total = gradcrackerListingTotal(root)
+				// The count is the walk's only proof of completeness: without it, a page
+				// that came back empty mid-walk would end the walk looking like the last.
+				if total = gradcrackerListingTotal(root); total == 0 {
+					return nil, fmt.Errorf("gradcracker: listing %s page 1 states no result count", d)
+				}
 			}
 			cards := parseGradcrackerListing(root)
 			if len(cards) == 0 {
@@ -256,22 +260,29 @@ func (g gradcracker) hydrate(ctx context.Context, fresh []gradcrackerCard, gate 
 	if deferred > 0 {
 		log.Printf("gradcracker: hydration budget %d reached; %d new postings wait for a later run", g.maxNewPerRun, deferred)
 	}
-	read, failed := 0, 0
+	// Each attempted page ends one of four ways. A body read is stored. A 404/410 (the posting
+	// is gone) and a 200 that carries no body are ANSWERS: neither is stored — a body-less row
+	// would be seen, and nothing would buy its body again — but neither says the crawl is
+	// broken. Only a request that got no answer at all (a refusal, a timeout, a 5xx) counts
+	// against the run.
+	attempted, read, gone, bodyless := 0, 0, 0, 0
 	for _, c := range toHydrate {
+		attempted++
 		root, err := g.http.GetHTML(ctx, c.URL)
 		if err != nil {
+			if !detailUnreadable(err) {
+				gone++
+				continue
+			}
 			if isRateLimited(err) {
 				log.Printf("gradcracker: posting pages refused (%v); deferring the rest of this run's hydration", err)
 				break
-			}
-			if detailUnreadable(err) { // a 404/410 is the posting gone, which is an answer
-				failed++
 			}
 			continue
 		}
 		body, ok := gradcrackerBody(root)
 		if !ok {
-			failed++
+			bodyless++
 			continue
 		}
 		j := c.job()
@@ -279,13 +290,16 @@ func (g gradcracker) hydrate(ctx context.Context, fresh []gradcrackerCard, gate 
 		out = append(out, j)
 		read++
 	}
-	if failed > 0 {
-		log.Printf("gradcracker: %d/%d posting pages could not be read; deferred to a later run", failed, len(toHydrate))
+	if unanswered := attempted - read - gone - bodyless; unanswered > 0 || bodyless > 0 {
+		log.Printf("gradcracker: of %d posting pages, %d read, %d gone, %d without a body, %d unanswered; the unread wait for a later run",
+			attempted, read, gone, bodyless, unanswered)
 	}
-	// A run that needed bodies and read none of them is a failure, not a quiet source: a
-	// refusing edge or a changed posting page would otherwise hide behind a green unit.
-	if len(toHydrate) > 0 && read == 0 {
-		return nil, fmt.Errorf("gradcracker: needed %d posting pages and read none of them", len(toHydrate))
+	// A run whose every posting-page request went unanswered is a failure, not a quiet source:
+	// a refusing edge would otherwise hide behind a green unit. Anything answered — even only
+	// "gone" or a page without a body — keeps the run, and with it every stored posting's
+	// refresh and the sweep.
+	if attempted > 0 && read+gone+bodyless == 0 {
+		return nil, fmt.Errorf("gradcracker: none of the %d posting pages attempted was answered", attempted)
 	}
 	return out, nil
 }

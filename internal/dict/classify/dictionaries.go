@@ -1,5 +1,7 @@
 package classify
 
+import "regexp"
+
 // aliasEntry pairs a lowercase title alias with its enrich-vocabulary canonical.
 // The ordered table is the single source of truth: its order encodes precedence
 // (the most specific / highest-rank alias first, so a title carrying several terms
@@ -38,18 +40,27 @@ var gradeBlindPhrases = []string{
 	// ("Enterprise Account Executive (Middle-East & Africa)" read as middle).
 	"middle-east",
 	"lead-generation",
-	// University administration and the recruiting function that hires graduates:
-	// each names an office or a desk, not an entry-level hire, so the bare "graduate"
-	// alias must not grade "Assistant Director of Graduate Admissions" or "Graduate
-	// Recruitment Manager" junior. All drawn from prod titles carrying the word.
-	"graduate admissions",
-	"graduate school",
-	"graduate studies",
-	"graduate student center",
-	"graduate recruitment",
-	"graduate recruiter",
-	"graduate program coordinator",
-	"graduate programme coordinator",
+}
+
+// earlyCareersDeskPatterns are the grade-blind phrases of the early-careers vocabulary,
+// stated as a SHAPE rather than a list: the staff who run graduate programmes and
+// placements — university offices, graduate recruiting, placement officers — carry
+// "graduate"/"placement" right next to the desk they name, and the catalogue (broader
+// than IT) holds real postings for all of them: "Assistant Director of Graduate
+// Admissions", "Graduate Recruiting Manager", "Graduate Medical Education Coordinator",
+// "Work Placement Officer", "Placement Year Manager". Masked, they state no grade,
+// exactly as the "graduate"/"placement" aliases would never have matched them.
+//
+// The first shape is the word FOLLOWED by the desk (optionally through "program(me)"):
+// "Graduate Program Manager", "Industrial Placement Coordinator". The second is a desk
+// in charge OF "graduate programs": "Director of Graduate Programs", "Manager,
+// Graduate Programs". A hire's own title never has that shape — "Graduate Project
+// Manager" puts its craft between the two, and "Software Engineering Graduate
+// Programme" names no desk — and a real grade elsewhere in the title survives the cut
+// ("Senior Graduate Recruiter" is senior).
+var earlyCareersDeskPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\b(?:graduate|(?:(?:industrial|industry|work|summer|student|sandwich) )?placement(?: year| student)?)(?: program(?:me)?s?)? (?:co-?ordinator|manager|director|officer|advis[eo]r|administrator|recruiter|recruiting|recruitment|admissions|school|studies|office|medical education|student cent(?:er|re))\b`),
+	regexp.MustCompile(`\b(?:director|manager|co-?ordinator|officer|head|dean|advis[eo]r|administrator)(?: of| for|,)? graduate program(?:me)?s\b`),
 }
 
 // categoryNone is the sentinel canonical for a "blind" alias: a phrase that CONTAINS a
@@ -144,8 +155,8 @@ var seniorityTable = []aliasEntry{
 	// matcher gives "graduate position". It is LAST, below every intern alias, because
 	// it is the weakest evidence in the table: "Graduate Summer Internship" is an
 	// internship, and any explicit grade a title also states outranks it. The
-	// university-administration phrases that merely contain the word are masked in
-	// gradeBlindPhrases.
+	// staff desks that merely contain the word are masked by
+	// earlyCareersDeskPatterns.
 	{"graduate", "junior"},
 }
 

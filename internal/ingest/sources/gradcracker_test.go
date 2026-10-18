@@ -250,6 +250,39 @@ func TestGradcrackerRefusesATruncatedWalk(t *testing.T) {
 	}
 }
 
+// Without the listing's own count there is no proof the walk was whole: a page that came back
+// empty mid-walk would end it looking like the last page.
+func TestGradcrackerRefusesAListingWithoutItsCount(t *testing.T) {
+	uncounted := strings.Replace(gradcrackerFixture(t, "listing.html"), "Show 1455 results", "", 1)
+	f := &fakeGradcracker{bodies: map[string]string{gcCT1: uncounted, gcCT2: gcEmptyDoc, gcEE1: uncounted, gcEE2: gcEmptyDoc}}
+	all := func(string) bool { return true } // every posting stored: only the walk can fail
+	if _, err := NewGradcracker(f, 0).(HydratingSource).FetchNew(context.Background(), CompanyEntry{}, all); err == nil || !strings.Contains(err.Error(), "result count") {
+		t.Fatalf("err = %v, want the run to fail when page 1 states no result count", err)
+	}
+}
+
+// A posting page that answers 404/410 (the posting is gone) or permanently carries no body is
+// an ANSWER. Failing the run on it would throw away every stored posting's refresh, skip the
+// sweep and, run after run, age the whole provider into the chronic-board close.
+func TestGradcrackerAnsweredPostingPagesDoNotFailTheRun(t *testing.T) {
+	for name, page := range map[string]string{"gone": "", "body-less": gcEmptyDoc} {
+		bodies := map[string]string{gcCT1: gradcrackerListing(t), gcEE1: gradcrackerListing(t)}
+		if page != "" {
+			bodies[gcEYTech], bodies[gcEYFin] = page, page
+		} // else: unrouted, so the fake answers 404
+		f := &fakeGradcracker{bodies: bodies}
+		seen := func(id string) bool { return id == "86360" }
+		jobs, err := NewGradcracker(f, 0).(HydratingSource).FetchNew(context.Background(), CompanyEntry{}, seen)
+		if err != nil {
+			t.Errorf("%s: %v", name, err)
+			continue
+		}
+		if len(jobs) != 1 || !jobs[0].SeenRefresh || jobs[0].ExternalID != "86360" {
+			t.Errorf("%s: jobs = %+v, want only the stored posting's refresh", name, jobs)
+		}
+	}
+}
+
 func TestGradcrackerAnyListingFailureFailsTheRun(t *testing.T) {
 	refused := func(u string) error { return &StatusError{Method: "GET", Code: 403, URL: u} }
 	for name, f := range map[string]*fakeGradcracker{

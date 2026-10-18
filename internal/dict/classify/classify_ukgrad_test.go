@@ -44,6 +44,24 @@ func TestParseUKEarlyCareers(t *testing.T) {
 		{"Director, McDougal Graduate Student Center and Student Life", ""},
 		{"Graduate Recruitment Manager", ""},
 		{"Assoc Professor-Graduate Program Coordinator-FWWSON", ""},
+		// The staff who RUN graduate programmes and placements: the word sits next to the
+		// desk it names, and that desk states no grade.
+		{"Director of Graduate Programs", ""},
+		{"Graduate Director", ""},
+		{"Graduate Program Manager", ""},
+		{"Manager, Graduate Programs", ""},
+		{"Graduate Recruiting Manager", ""},
+		{"Graduate Coordinator", ""},
+		{"Graduate Advisor", ""},
+		{"Graduate Medical Education Coordinator", ""},
+		{"Work Placement Officer", ""},
+		{"Industrial Placement Coordinator", ""},
+		{"Placement Year Manager", ""},
+		// ...while the hires themselves keep their grade.
+		{"Senior Graduate Recruiter", "senior"},
+		{"Industrial Placement – Software", "intern"},
+		{"Graduate Project Manager", "junior"},
+		{"Software Engineering Graduate Programme", "junior"},
 	}
 	for _, c := range cases {
 		if got := Parse(c.title).Seniority; got != c.wantSeniority {
