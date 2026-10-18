@@ -3,12 +3,13 @@ package classify
 import (
 	"strings"
 
+	"github.com/strelov1/freehire/internal/dict/roletype"
 	"github.com/strelov1/freehire/internal/dict/wordmatch"
 )
 
 // nonTechTitleTerms is a curated set of confidently non-technical role nouns
-// found in job titles, beyond the four non-tech categories the categoryTable
-// already resolves (marketing/sales/support/management). It exists to place the
+// found in job titles, beyond the business functions the categoryTable already
+// resolves (marketing/sales/support). It exists to place the
 // large tail of non-engineering roles that generic ATS boards pour into the
 // catalogue — healthcare, trades, hospitality, retail, logistics, education,
 // personal care, facilities — which the tech-focused categoryTable leaves empty.
@@ -197,8 +198,13 @@ var nonTechTitleTerms = []string{
 // cannot FILE is still refused, because a posting no facet reaches is one search
 // excludes anyway (search.CategoryUnresolved). Growing the catalogue is therefore a
 // dictionary change: give the role a category and the next crawl admits it.
+//
+// The role_type facet is the other placement, and it vetoes for the same reason: a
+// "General Manager" names no craft, but roletype marks it a people manager, search
+// keeps it on that facet, and refusing it here would turn away a posting search would
+// have shown. The two gates must agree — a posting is kept iff some facet reaches it.
 func ConfirmedNonTech(title string, hasTechEvidence bool) bool {
-	if hasTechEvidence || Parse(title).Category != "" {
+	if hasTechEvidence || Parse(title).Category != "" || roletype.Derive(title) != "" {
 		return false
 	}
 	return IsNonTech(title)

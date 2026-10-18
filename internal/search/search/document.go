@@ -172,11 +172,22 @@ func FromJob(j db.Job) (JobDocument, error) {
 // dictionary alone or from a source's own structured signal (jobderive.Input.IsTechHint
 // — e.g. Profession's dedicated itdev/itops boards, issue #2601). Such a job stays
 // searchable even if its category never resolves further.
+//
+// Nor does it apply to a people manager. The role_type facet is a placement of its own:
+// a "General Manager" or an "Assistant Manager" names no craft, so no category is true
+// for it, but internal/dict/roletype marks it people_manager and the facet reaches it.
+// That axis is what the retired `management` category was a proxy for, and the posting
+// is kept on it. The marker is read through the same roletype.Derive FromJob writes onto
+// the document, so the gate and the facet cannot disagree about a title.
+// classify.ConfirmedNonTech applies the same veto at ingest, for the same reason.
 func CategoryUnresolved(j db.Job) bool {
 	if j.Category != "" {
 		return false
 	}
 	if j.IsTech.Valid && j.IsTech.Bool {
+		return false
+	}
+	if roletype.Derive(j.Title) != "" {
 		return false
 	}
 	var e enrich.Enrichment
