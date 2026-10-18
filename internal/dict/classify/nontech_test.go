@@ -95,11 +95,32 @@ func TestConfirmedNonTech_EngineeringDesignIsVetoed(t *testing.T) {
 		}
 	}
 
-	// The veto is scoped to the craft categories: a genuinely non-technical title with no
-	// category, and one in another non-tech category, are still confirmed.
-	for _, title := range []string{"HVAC Technician", "Warehouse Janitorial Cleaner", "Registered Nurse"} {
+}
+
+// The catalogue is broader than IT, so ANY resolved category vetoes the refusal — the
+// consumer and service categories as much as the craft ones. A title the dictionary
+// files is kept under its facet; only a non-technical title it cannot file is refused.
+func TestConfirmedNonTech_AnyCategoryVetoes(t *testing.T) {
+	for _, title := range []string{
+		"Registered Nurse", "Line Cook", "Cashier", "HVAC Technician",
+		"Warehouse Janitorial Cleaner", "Pharmacist", "Administrative Assistant",
+		"Повар", "Продавец-кассир", "Operador(a) de Caixa",
+	} {
+		if !IsNonTech(title) {
+			t.Fatalf("precondition: %q must match the non-tech dictionary for this test to mean anything", title)
+		}
+		if ConfirmedNonTech(title, false) {
+			t.Errorf("ConfirmedNonTech(%q, false) = true, want false (category %q vetoes the refusal)", title, Parse(title).Category)
+		}
+	}
+
+	// A non-technical title no category files is still refused.
+	for _, title := range []string{"Social Worker", "Lab Technician"} {
+		if Parse(title).Category != "" {
+			t.Fatalf("precondition: %q must resolve no category, got %q", title, Parse(title).Category)
+		}
 		if !ConfirmedNonTech(title, false) {
-			t.Errorf("ConfirmedNonTech(%q, false) = false, want true — the veto must not widen", title)
+			t.Errorf("ConfirmedNonTech(%q, false) = false, want true — an unfiled non-tech title is still refused", title)
 		}
 	}
 }
