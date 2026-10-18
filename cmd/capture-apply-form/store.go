@@ -24,9 +24,15 @@ func newDBStore(pool *pgxpool.Pool) *dbStore {
 
 var _ applyform.Store = (*dbStore)(nil)
 
-func (s *dbStore) Claim(ctx context.Context, batch, leaseSeconds int) ([]applyform.Claimed, error) {
+func (s *dbStore) Claim(ctx context.Context, batch, leaseSeconds int, skip []string) ([]applyform.Claimed, error) {
+	// A nil slice reaches Postgres as NULL, and `<> ALL(NULL)` matches no row: the whole
+	// queue would look empty. An empty array matches every row.
+	if skip == nil {
+		skip = []string{}
+	}
 	rows, err := s.q.ClaimApplyFormBatch(ctx, db.ClaimApplyFormBatchParams{
 		LeaseSeconds: int32(leaseSeconds),
+		SkipSources:  skip,
 		BatchSize:    int32(batch),
 	})
 	if err != nil {
