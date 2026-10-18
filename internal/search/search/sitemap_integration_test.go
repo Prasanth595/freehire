@@ -221,10 +221,11 @@ func TestIntegration_FreshJobSitemapOrder(t *testing.T) {
 		}
 	})
 
-	// The fresh reader must narrow to the same population the paged one does. Proving
-	// it against the engine rather than against the filter string is what catches a
-	// filter that parses but selects differently under a sort.
-	t.Run("applies the same scope as the paged reader", func(t *testing.T) {
+	// The fresh reader narrows to the paged reader's population AND to technical
+	// postings (freshSitemapFilter). Proving it against the engine rather than against
+	// the filter string is what catches a filter that parses but selects differently
+	// under a sort.
+	t.Run("applies the paged scope, technical postings only", func(t *testing.T) {
 		nonTech := db.Job{ID: 4, Title: "Registered Nurse", Company: "Gamma", PublicSlug: "non-tech-fresh", Category: "healthcare", IsTech: pgtype.Bool{Bool: false, Valid: true}, CreatedAt: at(21)}
 		evergreen := db.Job{ID: 5, Title: "Backend Engineer", Company: "Delta", PublicSlug: "evergreen-newest", Category: "backend", IsTech: yes, CreatedAt: at(22)}
 		indexJobsForSitemap(t, c, []db.Job{nonTech, evergreen}, []string{jobreality.ClassFresh, jobreality.ClassLikelyEvergreen})
@@ -233,8 +234,13 @@ func TestIntegration_FreshJobSitemapOrder(t *testing.T) {
 		if err != nil {
 			t.Fatalf("ListFreshSitemapPage: %v", err)
 		}
-		if len(docs) == 0 || docs[0].Slug != "non-tech-fresh" {
-			t.Fatalf("fresh sitemap = %v, want the categorised non-tech posting first — it is the newest the paged reader names", docs)
+		if len(docs) == 0 || docs[0].Slug != "newest" {
+			t.Fatalf("fresh sitemap = %v, want the newest technical posting first", docs)
+		}
+		for _, d := range docs {
+			if d.Slug == "non-tech-fresh" {
+				t.Fatalf("fresh sitemap named a non-technical posting, though the paged files carry it: %v", docs)
+			}
 		}
 		for _, d := range docs {
 			if d.Slug == "evergreen-newest" {
