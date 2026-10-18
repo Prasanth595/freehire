@@ -1913,10 +1913,9 @@ func TestParse_AnalystIsQualifiedOrNothing(t *testing.T) {
 // decides nothing. See TestCategories_ServiceOverlaps.
 //
 // What it cost was invisible from inside this package. `security` is in
-// vocab.TechCategories, and jobderive.TechEvidence treats a technical CATEGORY as enough
-// to set is_tech TRUE on its own — ahead of the non-tech dictionary, deliberately, so
-// that "Backend Engineer — Teller Systems" is not deleted on its accidental "teller"
-// match. So the bare alias did not merely mis-file a mall guard's facet: it asserted the
+// vocab.TechCategories, and jobderive treats a technical CATEGORY as enough to set
+// is_tech TRUE on its own — ahead of the non-tech dictionary, deliberately, so that
+// "Backend Engineer — Teller Systems" is not refused on its accidental "teller" match. So the bare alias did not merely mis-file a mall guard's facet: it asserted the
 // guard was a technical posting, and no later evidence could take that back. Measured
 // over the 150 commonest live titles carrying the word (10 276 open postings), it
 // declared 10 156 of them technical; with the qualified forms, 5 917.

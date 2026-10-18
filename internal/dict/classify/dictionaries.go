@@ -463,7 +463,7 @@ var categoryTable = []aliasEntry{
 	// technical, and "Security Supervisor" (149) and bare "Security" (91) behind them.
 	// The bare alias sent every one of those to the security category, and because
 	// `security` is in vocab.TechCategories that category is enough for
-	// jobderive.TechEvidence to set is_tech TRUE on its own, ahead of the non-tech
+	// jobderive to set is_tech TRUE on its own, ahead of the non-tech
 	// dictionary. So a mall guard was filed as an IT security role — in search, and
 	// (since 2026-09-14) in what cmd/search-ping spends Google's Indexing API quota on.
 	//
@@ -1244,7 +1244,7 @@ var categoryTable = []aliasEntry{
 	// Board Certified Behavior Analysts — school ABA therapists — and the rest
 	// investment, purchasing, risk, pricing, research, policy and tax analysts. All
 	// 102,222 had is_tech = true, so all of them were eligible for the enrichment budget,
-	// and TechEvidence's veto shielded every one from the non-technical dictionary.
+	// and that technical category shielded every one from the non-technical dictionary.
 	//
 	// The technical families it was hiding are named individually instead, each in its
 	// own block above and each resolving MORE precisely than this ever did: test,

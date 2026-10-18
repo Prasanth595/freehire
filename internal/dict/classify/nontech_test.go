@@ -70,13 +70,13 @@ func TestIsNonTech(t *testing.T) {
 	}
 }
 
-// A title the category dictionary places in engineering_design must never be deleted
+// A title the category dictionary places in engineering_design must never be refused
 // on the non-tech dictionary's word match. The two vocabularies overlap by design —
 // the physical trades the non-tech list anchors ("hvac", "sheet metal", "machinist")
 // are the same trades that post draughting work — and engineering_design is a
 // deliberate placement, not the absence of a signal. Without this veto, splitting the
 // category out of `design` (where TechCategories supplied the veto for free) turns an
-// "HVAC Designer" away at ingest and hard-deletes the stored rows through prune.
+// "HVAC Designer" away at ingest.
 func TestConfirmedNonTech_EngineeringDesignIsVetoed(t *testing.T) {
 	vetoed := []string{
 		"HVAC Design Engineer",
@@ -128,8 +128,8 @@ func TestConfirmedNonTech_AnyCategoryVetoes(t *testing.T) {
 // The same veto, reached from the other direction and with a sharper edge. The non-tech
 // term list carries "охрана труда"/"охране труда" — the Russian name of the
 // occupational-safety profession — so before this category existed every Russian HSE
-// title was turned away by the ingest catalogue filter and hard-deleted by the prune
-// title rule, both of which funnel through ConfirmedNonTech. A facet no posting can
+// title was turned away by the ingest catalogue filter, which funnels through
+// ConfirmedNonTech. A facet no posting can
 // reach is not a facet, which is why this test guards the category rather than the
 // dictionary entry.
 func TestConfirmedNonTech_OccupationalSafetyIsVetoed(t *testing.T) {
