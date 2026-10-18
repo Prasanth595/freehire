@@ -179,7 +179,8 @@ directly but cannot sort, and that is what let the sitemap stop asking Postgres 
 number millions of rows on every render. Separately, a **freshest-first job
 sub-sitemap** SHALL list open jobs ordered by creation time, newest first, bounded to
 a fixed recent window, and SHALL be listed in the index **ahead of** the paged
-chunks. The paged chunks carry the whole findable catalogue, technical or not; the
+chunks. The paged chunks carry the whole findable catalogue, technical or not, except
+postings classified likely-evergreen; the
 freshest-first file draws on its technical part only, because with the catalogue open
 beyond IT its fixed window would otherwise hold a couple of hours of non-technical
 intake. A job may appear in both, which the sitemap protocol permits.
@@ -221,8 +222,9 @@ optional field.
 
 - **WHEN** the freshest-first job sub-sitemap is requested at its first offset
 - **THEN** the response is a valid `<urlset>` of open-job (`/jobs/:slug`) URLs whose
-  entries are in non-increasing order of the job's CREATION time — the newest job in
-  the catalogue first — each carrying a `<lastmod>` when the index holds one
+  entries are in non-increasing order of the job's CREATION time — the newest eligible
+  technical job first — each carrying a `<lastmod>` when the index holds one, and no
+  non-technical job appears
 
 #### Scenario: the freshest-first sub-sitemap is listed before the paged chunks
 
@@ -240,7 +242,8 @@ optional field.
 
 - **WHEN** the index's paged job sub-sitemaps are followed in sequence by their
   offsets
-- **THEN** every findable open job appears, each entry is a `/jobs/:slug` URL carrying
+- **THEN** every findable open job not classified likely-evergreen appears, technical
+  or not, each entry is a `/jobs/:slug` URL carrying
   a `<lastmod>` when the index holds one, no closed job appears, and no sub-sitemap
   exceeds the per-file limit
 

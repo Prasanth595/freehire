@@ -20,6 +20,7 @@ type fakeRepo struct {
 	listLimit   int32
 	closedLimit int32
 	recordErr   error
+	techErr     error
 }
 
 func take(all []Candidate, limit int32) []Candidate {
@@ -35,6 +36,9 @@ func (f *fakeRepo) JobsToPing(_ context.Context, _ string, tier Tier, limit int3
 		return take(f.beyond, limit), nil
 	}
 	f.listLimit = limit
+	if f.techErr != nil {
+		return nil, f.techErr
+	}
 	return take(f.candidates, limit), nil
 }
 
@@ -488,6 +492,40 @@ func TestTechnicalPostingsTakeTheBudgetBeforeTheRest(t *testing.T) {
 		if tier == TierBeyondTech {
 			t.Fatal("the beyond-tech tier was queried with no budget left for it")
 		}
+	}
+}
+
+// A failed technical lookup is not an empty technical tier: the budgeted engine must not
+// read it as "nothing technical to announce" and spend the day on the rest.
+func TestAFailedTechnicalLookupStopsTheBudgetedEngine(t *testing.T) {
+	repo := &fakeRepo{techErr: errors.New("database is down"), beyond: candidates(10), closed: candidates(10)}
+	engine := &fakeEngine{name: "google", budget: 200, accept: 10}
+
+	reports := New(repo, "https://freehire.me", engine).Run(context.Background(), 50)
+
+	if pickTier(t, reports, "google", TierTech).Err == nil {
+		t.Fatal("the technical pass must report its lookup failure")
+	}
+	for _, tier := range repo.tiersAsked {
+		if tier == TierBeyondTech {
+			t.Fatal("the beyond-tech tier was queried after the technical lookup failed")
+		}
+	}
+	if len(repo.recorded) != 0 {
+		t.Fatalf("recorded %d pings, want none", len(repo.recorded))
+	}
+}
+
+// An unbounded engine shares no allowance between passes, so one failed lookup does
+// not silence the rest.
+func TestAFailedTechnicalLookupDoesNotStopAnUnboundedEngine(t *testing.T) {
+	repo := &fakeRepo{techErr: errors.New("database is down"), beyond: candidates(3)}
+	engine := &fakeEngine{name: "indexnow", budget: 0, accept: 10}
+
+	reports := New(repo, "https://freehire.me", engine).Run(context.Background(), 50)
+
+	if got := pickTier(t, reports, "indexnow", TierBeyondTech).Recorded; got != 3 {
+		t.Fatalf("beyond-tech recorded %d, want 3", got)
 	}
 }
 

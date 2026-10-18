@@ -303,6 +303,15 @@ func (r *Runner) walk(ctx context.Context, batch int, run func(context.Context, 
 			report := run(ctx, engine, p, limit)
 			reports = append(reports, report)
 			left -= report.spent()
+			// The passes are in priority order, so a budgeted engine whose candidate
+			// lookup failed stops there: the empty answer would otherwise hand the day's
+			// allowance to the tiers meant to get only what technical postings left. A
+			// pass that failed AFTER offering something (a send or a ledger write) has
+			// already been charged for what the engine took, so it does not stop the
+			// rest. An unbounded engine shares nothing between passes, so it carries on.
+			if report.Err != nil && report.Offered == 0 && engine.DailyBudget() > 0 {
+				break
+			}
 		}
 	}
 	return reports
