@@ -53,7 +53,9 @@ were integration tests. Measured on prod 2026-08-18: **19,827 jobs close per day
 3-hour reindex cycle**, and every one of them stayed searchable until the next rebuild.
 
 - **The enqueue rides the closing statement**, as a CTE over the `UPDATE`'s `RETURNING`. Every
-  closing query carries it. A sweep closes a whole provider's stale postings in
+  closing query carries it except `CloseMisattributedSourceJobs`, which deliberately queues
+  nothing: its 1.47M closures would sit in front of every other Meilisearch task, and the next
+  full rebuild drops them anyway (see `cmd/close-apploi-misattributed`). A sweep closes a whole provider's stale postings in
   one round trip, so a per-row enqueue would undo that; riding the statement also makes the
   enqueue atomic (a rolled-back close queues nothing) and exact (only rows that actually
   closed are queued).

@@ -76,7 +76,8 @@ RETURNING failed_at;
 -- full `make reindex` streams only OPEN jobs into the fresh index, so the stale document
 -- leaves on the next scheduled rebuild regardless. Re-arming the row (an `ON CONFLICT …
 -- DO UPDATE` that clears failed_at where it is set) is the fix if the gauge ever shows
--- this happening; it is the identical CTE in every closing query in jobs.sql, and worth
+-- this happening; it is the identical CTE in the closing queries in jobs.sql (all but
+-- CloseMisattributedSourceJobs, which queues nothing on purpose), and worth
 -- doing on evidence rather than on the strength of the reading above.
 DELETE FROM search_delete_outbox
 WHERE failed_at IS NOT NULL
