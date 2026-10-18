@@ -179,8 +179,10 @@ directly but cannot sort, and that is what let the sitemap stop asking Postgres 
 number millions of rows on every render. Separately, a **freshest-first job
 sub-sitemap** SHALL list open jobs ordered by creation time, newest first, bounded to
 a fixed recent window, and SHALL be listed in the index **ahead of** the paged
-chunks. Both draw on the same findable scope, so a job appears in both, which the
-sitemap protocol permits.
+chunks. The paged chunks carry the whole findable catalogue, technical or not; the
+freshest-first file draws on its technical part only, because with the catalogue open
+beyond IT its fixed window would otherwise hold a couple of hours of non-technical
+intake. A job may appear in both, which the sitemap protocol permits.
 
 The freshest-first file exists because a crawler's budget is finite and arbitrary
 order spends it on postings the crawler already holds. Measured on prod over

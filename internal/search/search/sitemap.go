@@ -170,8 +170,18 @@ func (c *Client) ListSitemapPage(ctx context.Context, offset, limit int) ([]Site
 // attributes do not raise it.
 const freshSitemapSort = "created_at:desc"
 
+// freshSitemapFilter narrows the fresh window to technical postings, unlike the paged
+// files, which carry the whole public catalogue. The window is a constant 40k URLs read
+// newest first, and with the catalogue open beyond IT it measured on prod (2026-10-18)
+// at about two hours of mostly non-technical intake, against 3.5 days of technical
+// postings before. Worse, Meilisearch returned that wider sorted window out of order
+// part-way through (offset 22k today, 24k June), which the technical-only filter does
+// not do through 39k. The fresh file is the crawl-budget signal, so it stays on the
+// postings this board exists for; the rest are still reachable through the paged files.
+const freshSitemapFilter = jobSitemapFilter + ` AND is_tech = "tech"`
+
 // ListFreshSitemapPage returns one offset-addressed page of the live jobs index
-// narrowed to jobSitemapFilter and ordered newest first.
+// narrowed to freshSitemapFilter and ordered newest first.
 //
 // It returns no total, unlike ListSitemapPage. The total exists there because the
 // sitemap index TILES the paged files by it (CountSitemapDocuments); the fresh window
@@ -196,7 +206,7 @@ func (c *Client) ListFreshSitemapPage(ctx context.Context, offset, limit int) ([
 	resp, err := c.facet.SearchWithContext(ctx, "", &meilisearch.SearchRequest{
 		Offset:               int64(offset),
 		Limit:                int64(limit),
-		Filter:               jobSitemapFilter,
+		Filter:               freshSitemapFilter,
 		Sort:                 []string{freshSitemapSort},
 		AttributesToRetrieve: []string{jobSlugField, lastmodField},
 	})
