@@ -47,8 +47,8 @@ func TestStoreClaimCarriesThePostingIdentity(t *testing.T) {
 	store := newDBStore(pool)
 	_, outboxID := queueOne(t, pool, "greenhouse", "stripe:800001")
 
-	// nil on purpose: the adapter must turn it into an empty array, or `<> ALL(NULL)`
-	// would claim nothing and this test would find no capture.
+	// nil on purpose: it reaches Postgres as NULL, which the claim must read as "skip
+	// nothing" — `<> ALL(NULL)` alone would claim nothing and find no capture here.
 	claims, err := store.Claim(context.Background(), 50, 3600, nil)
 	if err != nil {
 		t.Fatalf("Claim: %v", err)

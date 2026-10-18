@@ -52,6 +52,8 @@ ON CONFLICT (job_id) DO NOTHING;
 -- skip_sources names the platforms that answered 429 earlier in this run. Their entries
 -- stay queued untouched for a later run; leaving them claimable here would hand every
 -- following wave the same throttled platform's freshest postings and starve the rest.
+-- COALESCE because `<> ALL(NULL)` matches no row at all, and a nil Go slice arrives as
+-- NULL: without it, a caller that skips nothing would claim nothing.
 WITH claimable AS (
     SELECT o.id, o.job_id
     FROM apply_form_outbox o
@@ -59,7 +61,7 @@ WITH claimable AS (
     WHERE o.failed_at IS NULL
       AND (o.claimed_at IS NULL
            OR o.claimed_at < now() - make_interval(secs => sqlc.arg(lease_seconds)::int))
-      AND j.source <> ALL(sqlc.arg(skip_sources)::text[])
+      AND j.source <> ALL(COALESCE(sqlc.arg(skip_sources)::text[], '{}'))
     ORDER BY COALESCE(j.posted_at, j.created_at) DESC, j.id DESC
     FOR UPDATE OF o SKIP LOCKED
     LIMIT sqlc.arg(batch_size)

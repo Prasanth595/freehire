@@ -19,7 +19,7 @@ WITH claimable AS (
     WHERE o.failed_at IS NULL
       AND (o.claimed_at IS NULL
            OR o.claimed_at < now() - make_interval(secs => $1::int))
-      AND j.source <> ALL($2::text[])
+      AND j.source <> ALL(COALESCE($2::text[], '{}'))
     ORDER BY COALESCE(j.posted_at, j.created_at) DESC, j.id DESC
     FOR UPDATE OF o SKIP LOCKED
     LIMIT $3
@@ -67,6 +67,8 @@ type ClaimApplyFormBatchRow struct {
 // skip_sources names the platforms that answered 429 earlier in this run. Their entries
 // stay queued untouched for a later run; leaving them claimable here would hand every
 // following wave the same throttled platform's freshest postings and starve the rest.
+// COALESCE because `<> ALL(NULL)` matches no row at all, and a nil Go slice arrives as
+// NULL: without it, a caller that skips nothing would claim nothing.
 // Join jobs off the claimable CTE (not the UPDATE target o, which Postgres forbids in
 // FROM) so the platform identity comes back without a second query.
 func (q *Queries) ClaimApplyFormBatch(ctx context.Context, arg ClaimApplyFormBatchParams) ([]ClaimApplyFormBatchRow, error) {
