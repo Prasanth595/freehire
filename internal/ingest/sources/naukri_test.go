@@ -392,8 +392,11 @@ func TestNaukriStopsAtThePlatformsDeepestPage(t *testing.T) {
 	}
 }
 
-func TestNaukriDetailBudgetBoundsARun(t *testing.T) {
-	f := &naukriFake{pages: naukriSyntheticPages(t, 1, naukriDetailBudget+20, naukriDetailBudget+20), fail: map[string]error{}, details: map[string]string{}}
+// naukriBacklogFake lists n new postings on every board's first page, each with a readable
+// posting resource — a cold-start backlog larger than any budget.
+func naukriBacklogFake(t *testing.T, n int) *naukriFake {
+	t.Helper()
+	f := &naukriFake{pages: naukriSyntheticPages(t, 1, n, n), fail: map[string]error{}, details: map[string]string{}}
 	body := naukriRead(t, "naukri_job_181026004692.json")
 	var pages struct {
 		JobDetails []struct {
@@ -406,12 +409,44 @@ func TestNaukriDetailBudgetBoundsARun(t *testing.T) {
 	for _, r := range pages.JobDetails {
 		f.details[r.JobID] = strings.Replace(body, `"181026004692"`, strconv.Quote(r.JobID), 1)
 	}
+	return f
+}
+
+func TestNaukriOneBoardSpendsOnlyItsShare(t *testing.T) {
+	f := naukriBacklogFake(t, naukriDetailBudget+20)
 	jobs, err := NewNaukri(f).Fetch(context.Background(), CompanyEntry{Board: "5"})
 	if err != nil {
 		t.Fatalf("Fetch: %v", err)
 	}
-	if len(f.detailCalls()) != naukriDetailBudget || len(jobs) != naukriDetailBudget {
-		t.Errorf("detail calls = %d, jobs = %d; want both bounded at %d", len(f.detailCalls()), len(jobs), naukriDetailBudget)
+	if len(f.detailCalls()) != naukriBoardDetailShare || len(jobs) != naukriBoardDetailShare {
+		t.Errorf("detail calls = %d, jobs = %d; want both bounded at the board share %d",
+			len(f.detailCalls()), len(jobs), naukriBoardDetailShare)
+	}
+}
+
+// The budget is the RUN's: cmd/ingest crawls every board of the provider through one adapter,
+// so the boards together never exceed it, and each technical area still gets its share.
+func TestNaukriBoardsOfARunShareOneDetailBudget(t *testing.T) {
+	f := naukriBacklogFake(t, naukriDetailBudget)
+	src := NewNaukri(f)
+	perBoard := map[string]int{}
+	for _, board := range []string{"5", "8", "3", "4"} {
+		before := len(f.detailCalls())
+		if _, err := src.Fetch(context.Background(), CompanyEntry{Board: board}); err != nil {
+			t.Fatalf("board %s: %v", board, err)
+		}
+		perBoard[board] = len(f.detailCalls()) - before
+	}
+	if total := len(f.detailCalls()); total != naukriDetailBudget {
+		t.Errorf("detail calls across the run = %d, want the run budget %d", total, naukriDetailBudget)
+	}
+	for _, board := range []string{"5", "8", "3"} {
+		if perBoard[board] != naukriBoardDetailShare {
+			t.Errorf("board %s got %d details, want its share %d", board, perBoard[board], naukriBoardDetailShare)
+		}
+	}
+	if perBoard["4"] != 0 {
+		t.Errorf("board 4 got %d details after the run budget was spent", perBoard["4"])
 	}
 }
 

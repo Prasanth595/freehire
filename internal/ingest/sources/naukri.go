@@ -32,6 +32,9 @@ import (
 // fullBoardListing. See the Naukri traps in AGENTS.md.
 type naukri struct {
 	http HeaderJSONGetter
+	// spent counts the detail requests claimed across every board of the run, shared by the
+	// adapter's copies (boards may be crawled concurrently, hence atomic).
+	spent *atomic.Int64
 }
 
 const (
@@ -62,14 +65,22 @@ const (
 
 // The posting API served 150 requests at four concurrent (~4 req/s) through the shared proxy
 // without a refusal (2026-10-18). Half that rate leaves room for the proxy's other providers.
-// A cold start is ~23k postings across the three technical areas, so a run hydrates at most
-// naukriDetailBudget and the backlog accretes over the next runs; steady state is a few
-// hundred new postings a run.
+// A cold start is ~23k postings across the three technical areas, so a RUN — every board
+// cmd/ingest crawls in one process — hydrates at most naukriDetailBudget (~12.5 minutes at the
+// pace above) and the backlog accretes over the next runs; steady state is a few hundred new
+// postings a run.
+//
+// One board may spend at most naukriBoardDetailShare of it, a third for the three technical
+// areas, so area 5's 15k cold backlog cannot take the whole run while 8 and 3 wait. A fourth
+// board gets only what the others leave, which during a cold start is nothing; the shares drain
+// each saturated backlog at 500 a run (area 5's in ~30 runs), after which every board's new
+// postings fit and nothing is starved for good.
 const (
-	naukriRequestInterval = 500 * time.Millisecond
-	naukriRequestBurst    = 2
-	naukriDetailWorkers   = 4
-	naukriDetailBudget    = 1500
+	naukriRequestInterval  = 500 * time.Millisecond
+	naukriRequestBurst     = 2
+	naukriDetailWorkers    = 4
+	naukriDetailBudget     = 1500
+	naukriBoardDetailShare = naukriDetailBudget / 3
 )
 
 // naukriAppHeaders identify the Android app. Without them the API answers 400 "Please
@@ -84,8 +95,10 @@ var naukriTechAreas = map[string]bool{"3": true, "5": true, "8": true}
 
 var naukriBoardRE = regexp.MustCompile(`^[0-9]+$`)
 
-// NewNaukri builds the Naukri adapter over the given HTTP client.
-func NewNaukri(c HeaderJSONGetter) Source { return naukri{http: c} }
+// NewNaukri builds the Naukri adapter over the given HTTP client. The registry builds one
+// adapter per process and cmd/ingest crawls one provider per process, so the adapter's detail
+// counter is the run's.
+func NewNaukri(c HeaderJSONGetter) Source { return naukri{http: c, spent: new(atomic.Int64)} }
 
 // pacedNaukriGetter holds every request of a run — search and posting — to one limiter.
 func pacedNaukriGetter(c HeaderJSONGetter) HeaderJSONGetter {
@@ -204,11 +217,11 @@ func (s naukri) list(ctx context.Context, area string) ([]naukriListing, error) 
 }
 
 // hydrate maps the listed rows to Jobs. A seen posting is a liveness refresh with no request;
-// every other posting costs one detail request, up to the run's budget. A detail that could not
-// be read defers its posting to a later run rather than storing it body-less, which would never
-// be hydrated again.
+// every other posting costs one detail request, up to the board's share of the run's budget
+// (claimDetail). A detail that could not be read, or that the budget did not reach, defers its
+// posting to a later run rather than storing it body-less, which would never be hydrated again.
 func (s naukri) hydrate(ctx context.Context, rows []naukriListing, tech bool, seen func(string) bool) ([]Job, error) {
-	var budget, answered atomic.Int64
+	var board, asked, answered, deferred atomic.Int64
 	jobs := fetchDetails(rows, naukriDetailWorkers, func(r naukriListing) (Job, bool) {
 		base, ok := r.toJob(tech)
 		if !ok {
@@ -218,9 +231,11 @@ func (s naukri) hydrate(ctx context.Context, rows []naukriListing, tech bool, se
 			base.SeenRefresh = true
 			return base, true
 		}
-		if budget.Add(1) > naukriDetailBudget {
+		if !s.claimDetail(&board) {
+			deferred.Add(1)
 			return Job{}, false
 		}
+		asked.Add(1)
 		job, ok, err := s.withDetail(ctx, base)
 		if err != nil {
 			log.Printf("naukri: detail %s failed; deferring: %v", base.ExternalID, err)
@@ -231,14 +246,24 @@ func (s naukri) hydrate(ctx context.Context, rows []naukriListing, tech bool, se
 	})
 	// A crawl that asked for details and got no answer to any of them is broken, not quiet.
 	// "Answered" counts a posting the platform reported expired.
-	if wanted := min(budget.Load(), naukriDetailBudget); wanted > 0 && answered.Load() == 0 {
-		return nil, fmt.Errorf("naukri: requested %d posting details and none answered", wanted)
+	if asked.Load() > 0 && answered.Load() == 0 {
+		return nil, fmt.Errorf("naukri: requested %d posting details and none answered", asked.Load())
 	}
-	if budget.Load() > naukriDetailBudget {
-		log.Printf("naukri: detail budget %d spent; %d new postings deferred to later runs",
-			naukriDetailBudget, budget.Load()-naukriDetailBudget)
+	if deferred.Load() > 0 {
+		log.Printf("naukri: detail budget reached (%d a board, %d a run); %d new postings deferred to later runs",
+			naukriBoardDetailShare, naukriDetailBudget, deferred.Load())
 	}
 	return jobs, nil
+}
+
+// claimDetail reserves one detail request against the board's share and then the run's budget,
+// and reports whether both had room. A refused claim leaves the counters past their limit,
+// which only keeps later claims refused.
+func (s naukri) claimDetail(board *atomic.Int64) bool {
+	if board.Add(1) > naukriBoardDetailShare {
+		return false
+	}
+	return s.spent.Add(1) <= naukriDetailBudget
 }
 
 // withDetail adds the posting API's body, places, work arrangement and employment type.
