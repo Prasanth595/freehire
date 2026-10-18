@@ -38,6 +38,18 @@ var gradeBlindPhrases = []string{
 	// ("Enterprise Account Executive (Middle-East & Africa)" read as middle).
 	"middle-east",
 	"lead-generation",
+	// University administration and the recruiting function that hires graduates:
+	// each names an office or a desk, not an entry-level hire, so the bare "graduate"
+	// alias must not grade "Assistant Director of Graduate Admissions" or "Graduate
+	// Recruitment Manager" junior. All drawn from prod titles carrying the word.
+	"graduate admissions",
+	"graduate school",
+	"graduate studies",
+	"graduate student center",
+	"graduate recruitment",
+	"graduate recruiter",
+	"graduate program coordinator",
+	"graduate programme coordinator",
 }
 
 // categoryNone is the sentinel canonical for a "blind" alias: a phrase that CONTAINS a
@@ -105,6 +117,36 @@ var seniorityTable = []aliasEntry{
 	{"стажёр", "intern"},
 	{"стажер", "intern"},
 	{"стажировка", "intern"},
+	// UK early-careers vocabulary (gradcracker, and the UK employers' own boards). A
+	// placement there is a student's paid year or summer inside the employer, which is
+	// what an internship is. Every alias is a PHRASE: a bare "placement" names the
+	// recruiter's job ("Placement Coordinator") and the marketing one ("Product
+	// Placement"), and a bare "undergraduate" names most of a university's admissions
+	// and faculty titles — measured on prod, the majority of the unresolved titles
+	// carrying it were "The Undergraduate School - Adjunct Faculty" and its siblings.
+	{"industrial placement", "intern"},
+	{"industry placement", "intern"},
+	{"placement year", "intern"},
+	{"year placement", "intern"},
+	{"year in industry", "intern"},
+	{"placement student", "intern"},
+	{"student placement", "intern"},
+	{"summer placement", "intern"},
+	{"undergraduate placement", "intern"},
+	{"work placement", "intern"},
+	// "12 Month Placement" / "12-month placement": the duration is what makes it a
+	// student's year out rather than a recruiter placing a candidate.
+	{"month placement", "intern"},
+	{"vacation scheme", "intern"},
+	{"summer analyst", "intern"},
+	// "Graduate" is the entry-level hire (a graduate scheme, "Graduate Software
+	// Engineer", a hospital's "New Graduate RN") — the same reading the description
+	// matcher gives "graduate position". It is LAST, below every intern alias, because
+	// it is the weakest evidence in the table: "Graduate Summer Internship" is an
+	// internship, and any explicit grade a title also states outranks it. The
+	// university-administration phrases that merely contain the word are masked in
+	// gradeBlindPhrases.
+	{"graduate", "junior"},
 }
 
 // categoryTable lists category aliases in precedence order — multi-word and more
