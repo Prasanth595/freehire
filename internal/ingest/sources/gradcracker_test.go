@@ -261,25 +261,37 @@ func TestGradcrackerRefusesAListingWithoutItsCount(t *testing.T) {
 	}
 }
 
-// A posting page that answers 404/410 (the posting is gone) or permanently carries no body is
-// an ANSWER. Failing the run on it would throw away every stored posting's refresh, skip the
-// sweep and, run after run, age the whole provider into the chronic-board close.
-func TestGradcrackerAnsweredPostingPagesDoNotFailTheRun(t *testing.T) {
-	for name, page := range map[string]string{"gone": "", "body-less": gcEmptyDoc} {
-		bodies := map[string]string{gcCT1: gradcrackerListing(t), gcEE1: gradcrackerListing(t)}
-		if page != "" {
-			bodies[gcEYTech], bodies[gcEYFin] = page, page
-		} // else: unrouted, so the fake answers 404
-		f := &fakeGradcracker{bodies: bodies}
-		seen := func(id string) bool { return id == "86360" }
-		jobs, err := NewGradcracker(f, 0).(HydratingSource).FetchNew(context.Background(), CompanyEntry{}, seen)
-		if err != nil {
-			t.Errorf("%s: %v", name, err)
-			continue
-		}
-		if len(jobs) != 1 || !jobs[0].SeenRefresh || jobs[0].ExternalID != "86360" {
-			t.Errorf("%s: jobs = %+v, want only the stored posting's refresh", name, jobs)
-		}
+// A posting page that answers 404/410 is the posting gone — an answer. Failing the run on it
+// would throw away every stored posting's refresh, skip the sweep and, run after run, age the
+// whole provider into the chronic-board close.
+func TestGradcrackerGonePostingPagesDoNotFailTheRun(t *testing.T) {
+	// The new postings' pages are unrouted, so the fake answers 404.
+	f := &fakeGradcracker{bodies: map[string]string{gcCT1: gradcrackerListing(t), gcEE1: gradcrackerListing(t)}}
+	seen := func(id string) bool { return id == "86360" }
+	jobs, err := NewGradcracker(f, 0).(HydratingSource).FetchNew(context.Background(), CompanyEntry{}, seen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 1 || !jobs[0].SeenRefresh || jobs[0].ExternalID != "86360" {
+		t.Errorf("jobs = %+v, want only the stored posting's refresh", jobs)
+	}
+}
+
+// A 200 page with no body is NOT an answer: it is the parser failing. When every page that
+// came back 200 yielded no body, the posting page's layout has changed, and the run must say
+// so rather than go green while ingesting nothing new. One stuck page among good ones is
+// TestGradcrackerDefersAnUnreadablePostingPage, and passes.
+func TestGradcrackerFailsWhenNoFetchedPageYieldsABody(t *testing.T) {
+	f := &fakeGradcracker{bodies: map[string]string{
+		gcCT1:    gradcrackerListing(t),
+		gcEE1:    gradcrackerListing(t),
+		gcEYTech: gcEmptyDoc,
+		gcEYFin:  gcEmptyDoc,
+		// gcNPL unrouted: a 404 alongside does not rescue the run.
+	}}
+	_, err := NewGradcracker(f, 0).(HydratingSource).FetchNew(context.Background(), CompanyEntry{}, func(string) bool { return false })
+	if err == nil || !strings.Contains(err.Error(), "body") {
+		t.Fatalf("err = %v, want a failure naming the body-less pages", err)
 	}
 }
 

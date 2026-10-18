@@ -260,11 +260,11 @@ func (g gradcracker) hydrate(ctx context.Context, fresh []gradcrackerCard, gate 
 	if deferred > 0 {
 		log.Printf("gradcracker: hydration budget %d reached; %d new postings wait for a later run", g.maxNewPerRun, deferred)
 	}
-	// Each attempted page ends one of four ways. A body read is stored. A 404/410 (the posting
-	// is gone) and a 200 that carries no body are ANSWERS: neither is stored — a body-less row
-	// would be seen, and nothing would buy its body again — but neither says the crawl is
-	// broken. Only a request that got no answer at all (a refusal, a timeout, a 5xx) counts
-	// against the run.
+	// Each attempted page ends one of four ways. A body read is stored. A 404/410 is the
+	// posting gone — an answer, never stored. A 200 that carries no body is NOT an answer: it
+	// is the parser failing on the page, and it is deferred rather than stored body-less (a
+	// stored row is seen, and nothing would buy its body again). A refusal, a timeout or a
+	// 5xx is no answer at all.
 	attempted, read, gone, bodyless := 0, 0, 0, 0
 	for _, c := range toHydrate {
 		attempted++
@@ -294,10 +294,14 @@ func (g gradcracker) hydrate(ctx context.Context, fresh []gradcrackerCard, gate 
 		log.Printf("gradcracker: of %d posting pages, %d read, %d gone, %d without a body, %d unanswered; the unread wait for a later run",
 			attempted, read, gone, bodyless, unanswered)
 	}
-	// A run whose every posting-page request went unanswered is a failure, not a quiet source:
-	// a refusing edge would otherwise hide behind a green unit. Anything answered — even only
-	// "gone" or a page without a body — keeps the run, and with it every stored posting's
-	// refresh and the sweep.
+	// Two endings are failures, not a quiet source. Every request unanswered: a refusing edge
+	// would otherwise hide behind a green unit. Pages fetched (200) but not one body parsed:
+	// the posting page's layout has changed, and a silent layout change is the worse outcome.
+	// One stuck page among good ones passes, and so does a run whose pages were only "gone" —
+	// either keeps every stored posting's refresh and the sweep.
+	if fetched := read + bodyless; fetched > 0 && read == 0 {
+		return nil, fmt.Errorf("gradcracker: %d posting pages fetched and none yielded a body; the page layout may have changed", fetched)
+	}
 	if attempted > 0 && read+gone+bodyless == 0 {
 		return nil, fmt.Errorf("gradcracker: none of the %d posting pages attempted was answered", attempted)
 	}
