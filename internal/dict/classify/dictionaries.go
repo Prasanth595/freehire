@@ -1706,6 +1706,9 @@ var categoryTable = []aliasEntry{
 	{"sales associate", "retail"},
 	{"retail associate", "retail"},
 	{"retail service specialist", "retail"},
+	// The factory-floor spelling of the shop-floor title. Declared here, above the bare
+	// "team member", because the production block below sits too late to take it.
+	{"production team member", "manufacturing"},
 	{"team member", "retail"},
 	{"cashier", "retail"},
 	{"merchandiser", "retail"},
@@ -2247,6 +2250,9 @@ var categoryTable = []aliasEntry{
 	{"воспитателя", "education"},
 	{"воспитатель", "education"},
 	{"преподаватель", "education"},
+	// A school's social worker, not a teacher: declared above the bare "педагог" that
+	// would otherwise take it.
+	{"социальный педагог", "social_services"},
 	{"педагог", "education"},
 	{"методист", "education"},
 
@@ -2419,7 +2425,6 @@ var categoryTable = []aliasEntry{
 	{"соцработник", "social_services"},
 	{"социальной работе", "social_services"}, // "специалист по социальной работе"
 	{"социальной работы", "social_services"}, // "... ведения социальной работы"
-	{"социальный педагог", "social_services"},
 	// German has no morphology here either: the -in and -en forms are their own
 	// words, while the gender star and colon are word boundaries ("Sozialpädagog*in").
 	{"sozialarbeiter", "social_services"},
@@ -2544,7 +2549,6 @@ var categoryTable = []aliasEntry{
 	// `logistics` above, so the bare "сборщик" here only reaches the assemblers.
 	{"production worker", "manufacturing"},
 	{"production technician", "manufacturing"},
-	{"production team member", "manufacturing"},
 	{"production lead", "manufacturing"},
 	{"production line", "manufacturing"},
 	{"line operator", "manufacturing"},

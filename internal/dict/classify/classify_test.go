@@ -1982,6 +1982,8 @@ func TestParse_SocialServicesScienceManufacturing(t *testing.T) {
 		{"Chaplain", "social_services", ""},
 		{"Социальный работник", "social_services", ""},
 		{"Специалист по социальной работе", "social_services", ""},
+		{"Социальный педагог", "social_services", "not the bare педагог, which is education"},
+		{"Production Team Member", "manufacturing", "not the bare team member, which is retail"},
 		{"Travailleur social", "social_services", ""},
 		{"Assistente Social", "social_services", ""},
 		{"Sozialarbeiter*in (m/w/d)", "social_services", ""},
