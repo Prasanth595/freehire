@@ -2586,7 +2586,7 @@ WHERE id = sqlc.arg(id)
 
 -- name: JobsForGeographyRecheckByIDs :many
 -- Title, location, description and the currently-stored countries/regions for a named set
--- of ids, for cmd/backfill-remote-region-restriction.
+-- of ids, for cmd/backfill-remote-region-restriction and cmd/backfill-region-vocab.
 --
 -- Ids come from a Meilisearch query for the same reason JobDescriptionsByIDs's do: a WHERE
 -- over `description` de-TOASTs the column for every row it examines, and the search index
@@ -2595,7 +2595,8 @@ SELECT id, title, location, description, countries, regions FROM jobs
 WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 
 -- name: SetJobGeography :execrows
--- Write one row's countries and regions, for cmd/backfill-remote-region-restriction.
+-- Write one row's countries and regions, for cmd/backfill-remote-region-restriction and
+-- cmd/backfill-region-vocab.
 --
 -- The IS DISTINCT FROM guard makes the pass idempotent, the same way SetJobWorkMode's
 -- does: a row already carrying the recomputed values is not rewritten, so a re-run writes
