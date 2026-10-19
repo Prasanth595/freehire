@@ -3394,6 +3394,11 @@ type Querier interface {
 	// to a recency window on occurred_at for the same first-deploy reason as the
 	// other candidate scans.
 	ListAutoApplySubmittedCandidates(ctx context.Context, windowDays int32) ([]ListAutoApplySubmittedCandidatesRow, error)
+	// Every stored posting of ONE board (open or closed), with the URL it was crawled at — what
+	// cmd/rekey-gupy-boards reads to learn which career page each posting of a retired
+	// companyId-keyed board lives on. Rides jobs_source_extid_pattern_idx through the same
+	// escaped LIKE prefix as ExistingExternalIDsByBoard (externalid.BoardPattern).
+	ListBoardJobURLs(ctx context.Context, arg ListBoardJobURLsParams) ([]ListBoardJobURLsRow, error)
 	// One user's still-unclassified submissions, newest first — the other half of the "my
 	// contributions" list (boards holds the recognized half).
 	ListBoardSubmissionsBySubmitter(ctx context.Context, submittedBy int64) ([]BoardSubmission, error)
@@ -5812,6 +5817,14 @@ type Querier interface {
 	// carrying the OLD slug, so an updated row leaves the set. A re-run updates zero, and
 	// stopping mid-way costs nothing — the next run resumes with what is left.
 	RekeyCompanySlugChunk(ctx context.Context, arg RekeyCompanySlugChunkParams) (int64, error)
+	// Move postings to a new board namespace in one statement: ids[i] gets external_ids[i]. The
+	// row keeps its id, so everything keyed by it (saves, tracking, enrichment, views) follows.
+	// IS DISTINCT FROM-guarded, so a re-run writes nothing. A target key another row of the
+	// source already holds fails the whole statement on (source, external_id) rather than
+	// silently skipping the row.
+	// The two parallel arrays are zipped WITH ORDINALITY because sqlc's analyzer does not resolve
+	// the two-array form of unnest (see companies.sql's domain_industry_map).
+	RekeyJobExternalIDs(ctx context.Context, arg RekeyJobExternalIDsParams) (int64, error)
 	// Void a consumption taken as a RESERVATION for work that then produced nothing.
 	//
 	// It RESTAMPS the row rather than deleting it or adding a compensating entry, and the

@@ -2511,6 +2511,48 @@ func (q *Queries) LatestOpenJobAddedAt(ctx context.Context) (pgtype.Timestamptz,
 	return last_job_added_at, err
 }
 
+const listBoardJobURLs = `-- name: ListBoardJobURLs :many
+SELECT id, external_id, url
+FROM jobs
+WHERE source = $1 AND external_id LIKE $2
+ORDER BY id
+`
+
+type ListBoardJobURLsParams struct {
+	Source       string `json:"source"`
+	BoardPattern string `json:"board_pattern"`
+}
+
+type ListBoardJobURLsRow struct {
+	ID         int64  `json:"id"`
+	ExternalID string `json:"external_id"`
+	URL        string `json:"url"`
+}
+
+// Every stored posting of ONE board (open or closed), with the URL it was crawled at — what
+// cmd/rekey-gupy-boards reads to learn which career page each posting of a retired
+// companyId-keyed board lives on. Rides jobs_source_extid_pattern_idx through the same
+// escaped LIKE prefix as ExistingExternalIDsByBoard (externalid.BoardPattern).
+func (q *Queries) ListBoardJobURLs(ctx context.Context, arg ListBoardJobURLsParams) ([]ListBoardJobURLsRow, error) {
+	rows, err := q.db.Query(ctx, listBoardJobURLs, arg.Source, arg.BoardPattern)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListBoardJobURLsRow{}
+	for rows.Next() {
+		var i ListBoardJobURLsRow
+		if err := rows.Scan(&i.ID, &i.ExternalID, &i.URL); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listEmployerJobs = `-- name: ListEmployerJobs :many
 SELECT id, source, external_id, url, title, company, location, remote, description, posted_at, created_at, updated_at, company_slug, enrichment, enriched_at, enrichment_version, public_slug, last_seen_at, closed_at, countries, regions, work_mode, liveness_strikes, skills, seniority, category, created_by, updated_by, posting_language, employment_type, education_level, experience_years_min, collections, content_hash, english_level, cities, view_count, applied_count, role_fingerprint, semantic_embedded_model, semantic_embedded_hash, duplicate_of, is_tech, semantic_embedding, salary_min_manual, salary_max_manual, salary_currency_manual, salary_period_manual, upvote_count, downvote_count, ats_absent_at, closed_reason, is_private, similar_job_ids, similar_computed_at, salary_min_source, salary_max_source, salary_currency_source, salary_period_source, company_slug_folded, duplicate_of_aggregator, duplicate_of_role, duplicate_of_fuzzy, requires_clearance, requirements_derived, hydrated_at, ai_interview_reports
 FROM jobs
@@ -4340,6 +4382,42 @@ func (q *Queries) RefreshUnchangedJob(ctx context.Context, arg RefreshUnchangedJ
 		&i.DuplicateOf,
 	)
 	return i, err
+}
+
+const rekeyJobExternalIDs = `-- name: RekeyJobExternalIDs :execrows
+WITH v AS (
+    SELECT i.id, e.external_id
+    FROM unnest($2::bigint[]) WITH ORDINALITY AS i(id, ord)
+    JOIN unnest($3::text[]) WITH ORDINALITY AS e(external_id, ord)
+      ON e.ord = i.ord
+)
+UPDATE jobs AS j
+SET external_id = v.external_id
+FROM v
+WHERE j.id = v.id
+  AND j.source = $1
+  AND j.external_id IS DISTINCT FROM v.external_id
+`
+
+type RekeyJobExternalIDsParams struct {
+	Source      string   `json:"source"`
+	Ids         []int64  `json:"ids"`
+	ExternalIds []string `json:"external_ids"`
+}
+
+// Move postings to a new board namespace in one statement: ids[i] gets external_ids[i]. The
+// row keeps its id, so everything keyed by it (saves, tracking, enrichment, views) follows.
+// IS DISTINCT FROM-guarded, so a re-run writes nothing. A target key another row of the
+// source already holds fails the whole statement on (source, external_id) rather than
+// silently skipping the row.
+// The two parallel arrays are zipped WITH ORDINALITY because sqlc's analyzer does not resolve
+// the two-array form of unnest (see companies.sql's domain_industry_map).
+func (q *Queries) RekeyJobExternalIDs(ctx context.Context, arg RekeyJobExternalIDsParams) (int64, error) {
+	result, err := q.db.Exec(ctx, rekeyJobExternalIDs, arg.Source, arg.Ids, arg.ExternalIds)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected(), nil
 }
 
 const requirementsDerivedBackfillBounds = `-- name: RequirementsDerivedBackfillBounds :one
