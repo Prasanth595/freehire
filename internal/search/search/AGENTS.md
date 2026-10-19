@@ -220,6 +220,25 @@ HNSW graph construction, so it lands on full rebuilds, not on incremental
 `search_outbox` pushes. Schedule it deliberately; `freehire-reindexw` has outgrown its
 slot before, and the disk floor already refuses rebuilds when free space is tight.
 
+## Query operators
+
+`ParseQuery` (`query_syntax.go`) reads `OR` and a leading `title:` in `q`. A
+query with neither is one alternative whose text is `q` byte-for-byte, so it
+builds exactly the single-index request it built before operators existed.
+Keep it that way: every search on the site goes through it.
+
+Two or more alternatives go out as ONE federated `/multi-search`
+(`federated.go`). Each query carries the same filter, sort and vector, and the
+federation pages, deduplicates and merges facets. Two traps:
+
+- Per-query `limit`, `offset` and `facets` are a 400 inside a federation.
+- `mergeFacets` defaults to 100 values per facet, so it must pass
+  `maxValuesPerFacet`.
+
+The merged sort is global only because the ranking rules put `sort` right after
+`words`. Each hit fully matches its own alternative, so the sort decides.
+Moving `sort` later breaks that, and `TestSearchOperatorsOnRealEngine` catches it.
+
 ## Description vectors and the agent's semantic search
 
 The jobs index carries a SECOND `userProvided` embedder, `desc` (768 dims, `descDimensions`),

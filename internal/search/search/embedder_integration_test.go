@@ -329,4 +329,20 @@ func TestIntegration_HybridSearchFindsByMeaning(t *testing.T) {
 		}
 		t.Errorf("hits = %v, want only job 1 (meaning match, inside the DE filter, pastry chef below threshold)", ids)
 	}
+
+	// A query with OR alternatives goes out as one federated multi-search; every
+	// alternative carries the vector, the filter and the threshold.
+	fed, err := c.Search(ctx, SearchParams{
+		Query:          "payments OR billing",
+		SemanticVector: unitDesc(6),
+		Filter:         FilterFromValues(map[string][]string{"countries": {"DE"}}),
+		ScoreThreshold: 0.6,
+		Limit:          10,
+	})
+	if err != nil {
+		t.Fatalf("federated hybrid Search: %v", err)
+	}
+	if len(fed.Hits) != 1 || fed.Hits[0].ID != 1 {
+		t.Errorf("federated hits = %d (first %v), want only job 1", len(fed.Hits), fed.Hits)
+	}
 }

@@ -6368,6 +6368,9 @@ type Querier interface {
 	SetJobEnrichment(ctx context.Context, arg SetJobEnrichmentParams) error
 	// Write one row's countries and regions, for cmd/backfill-remote-region-restriction.
 	//
+	// A nil slice (Derive resolving nothing) encodes as NULL, which the NOT NULL columns
+	// refuse; COALESCE writes it as the empty array the ingest upserts write.
+	//
 	// The IS DISTINCT FROM guard makes the pass idempotent, the same way SetJobWorkMode's
 	// does: a row already carrying the recomputed values is not rewritten, so a re-run writes
 	// nothing and stopping mid-way costs nothing to resume.

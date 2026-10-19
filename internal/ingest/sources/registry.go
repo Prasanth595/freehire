@@ -172,7 +172,7 @@ func All(c HTTPClient) map[string]Source {
 		NewSelfRecruit(c),
 		// Paced: its per-posting detail fan-out fired ~37k requests in 10 minutes and Teamtailor
 		// 403'd nearly half the fleet (see teamtailorRequestInterval).
-		NewTeamtailor(pacedHTMLGetter(c, teamtailorRequestInterval, teamtailorRequestBurst)),
+		NewTeamtailor(pacedTeamtailorGetter(c)),
 		NewHurma(c),
 		NewICIMS(c),
 		// careerspage is rate-paced (pacedHTMLGetter); the proxied path paces it too.
@@ -294,6 +294,10 @@ func All(c HTTPClient) map[string]Source {
 		// within ~2s (see doverRequestInterval's incident note in pacer.go).
 		NewDover(pacedDoverGetter(c)),
 		NewJobylon(c),
+		// Emply: Danish multi-tenant ATS, one career site per board (<slug>.career.emply.com or
+		// a customer domain). One keyless JSON listing carries every vacancy with its body.
+		// See emply.go.
+		NewEmply(c),
 		NewWorkAtAStartup(c),
 		NewJobStash(c),
 		NewArbeitnow(c),
@@ -443,6 +447,10 @@ func All(c HTTPClient) map[string]Source {
 		// site's edge refuses any self-identifying User-Agent on paths robots.txt allows, hence
 		// the browser string. See techinasia.go.
 		browserUASource(c, NewTechInAsia),
+		// Golang Jobs: niche board of Go developer postings. A client-rendered shell over a
+		// Supabase table read through PostgREST with the public anon key, both read from the
+		// site's app bundle on every run. See golangjobs.go.
+		NewGolangJobs(c),
 		// Welcome to the Jungle: European multi-company board, enumerated by WTTJ's own
 		// profession sub-category (board) over its public Algolia index, hydrating each new
 		// posting's body and apply URL from the posting API. See wttj.go.
@@ -608,6 +616,15 @@ func All(c HTTPClient) map[string]Source {
 	} else {
 		registry["jobboardly"] = NewJobboardly(NewLongTimeoutClient())
 	}
+	// HR-Manager: Danish ATS, board = customer alias, one job-portal API request per board with
+	// every advertisement body inline. The largest customer (663 postings) is a 12 MB answer
+	// that took 5s from the prod host and 25s from a residential line — past the standard 15s
+	// timeout, the HumanBit case again. See hrmanager.go.
+	if c == nil {
+		registry["hrmanager"] = NewHRManager(nil)
+	} else {
+		registry["hrmanager"] = NewHRManager(NewLongTimeoutClient())
+	}
 	// HerKey's posting resource answers in 4-15 s, close enough to the standard 15 s timeout
 	// that a share of every run would time out, so it rides the long-timeout transport, paced
 	// (see herkeyRequestInterval).
@@ -615,6 +632,15 @@ func All(c HTTPClient) map[string]Source {
 		registry["herkey"] = NewHerKey(nil)
 	} else {
 		registry["herkey"] = NewHerKey(pacedHerKeyGetter(NewLongTimeoutClient()))
+	}
+	// Naukri: India's largest job board, enumerated by functional area (board) through the
+	// search API its Android app calls, hydrating each new posting's body from the posting API.
+	// The edge serves only the app's User-Agent and tarpits datacenter IPs, so the crawl is
+	// really served once ApplyProxyEgress rebuilds it over the proxy (proxy.go). See naukri.go.
+	if c == nil {
+		registry["naukri"] = NewNaukri(nil)
+	} else {
+		registry["naukri"] = NewNaukri(pacedNaukriGetter(withUserAgent(c, naukriUserAgent)))
 	}
 	// meta/uber/gusto are NOT served by the shared client: Meta's edge 400s the default Go
 	// TLS+HTTP/2 fingerprint and Uber's and Gusto's Cloudflare edges challenge it, so all three
