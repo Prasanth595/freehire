@@ -16,7 +16,6 @@ func buildFederatedSearch(p SearchParams, alts []Alternative) *meilisearch.Multi
 	queries := make([]*meilisearch.SearchRequest, 0, len(alts))
 	for _, a := range alts {
 		q := p
-		q.Query = a.Text
 		if a.Fields != nil {
 			q.QFields = a.Fields
 		}
