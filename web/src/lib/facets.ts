@@ -393,6 +393,7 @@ export const SOURCE_LABELS: Record<string, string> = {
   jobboardly: 'Job Boardly',
   work180: 'WORK180',
   wuzzuf: 'WUZZUF',
+  hrmanager: 'HR-Manager',
 };
 
 /** Display label for a source slug (e.g. smartrecruiters → "SmartRecruiters"),
