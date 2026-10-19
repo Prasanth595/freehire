@@ -2,6 +2,7 @@ package search
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"reflect"
 	"testing"
@@ -93,5 +94,58 @@ func TestSearchRefusesTooManyAlternatives(t *testing.T) {
 	_, err := c.Search(context.Background(), SearchParams{Query: "a OR b OR c OR d OR e OR f", Limit: 10})
 	if !errors.Is(err, ErrTooManyAlternatives) {
 		t.Fatalf("err = %v, want ErrTooManyAlternatives", err)
+	}
+}
+func TestFederatedFacetsMergeWithTheIndexValueCap(t *testing.T) {
+	req := buildFederatedFacets([]Alternative{{Text: "a"}, {Text: "b", Fields: []string{"title"}}}, "x = 1", []string{"source"})
+	f := req.Federation
+	if f == nil || !reflect.DeepEqual(f.FacetsByIndex, map[string][]string{facetIndexUID: {"source"}}) {
+		t.Fatalf("Federation = %+v, want facetsByIndex for the jobs index", f)
+	}
+	if f.MergeFacets == nil || f.MergeFacets.MaxValuesPerFacet != maxValuesPerFacet {
+		t.Fatalf("MergeFacets = %+v, want maxValuesPerFacet %d (federation defaults to 100 and truncates)", f.MergeFacets, maxValuesPerFacet)
+	}
+	for i, q := range req.Queries {
+		if q.Facets != nil || q.Filter != "x = 1" {
+			t.Errorf("query %d = %+v: per-query facets are a 400 in a federation, and the filter must ride along", i, q)
+		}
+	}
+	if !reflect.DeepEqual(req.Queries[1].AttributesToSearchOn, []string{"title"}) {
+		t.Errorf("title: alternative lost its field scope")
+	}
+}
+
+func TestFacetSearchConvertsMergedFacets(t *testing.T) {
+	c := &Client{manager: fakeManager{multiFn: func(context.Context, *meilisearch.MultiSearchRequest) (*meilisearch.MultiSearchResponse, error) {
+		return &meilisearch.MultiSearchResponse{
+			EstimatedTotalHits: 3,
+			FacetDistribution:  map[string]json.RawMessage{"source": json.RawMessage(`{"a":2,"b":1}`)},
+			FacetStats:         map[string]json.RawMessage{"enrichment.salary_min": json.RawMessage(`{"min":1,"max":9}`)},
+		}, nil
+	}}}
+	resp, err := c.facetSearch(context.Background(), "x OR y", nil, []string{"source"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	fr, err := buildFacetResult(resp)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fr.Total != 3 || fr.Facets["source"]["a"] != 2 || fr.Stats["enrichment.salary_min"].Max != 9 {
+		t.Fatalf("FacetResult = %+v", fr)
+	}
+}
+
+func TestFacetSearchWithoutOperatorsStaysSingleIndex(t *testing.T) {
+	var gotQuery string
+	c := &Client{facet: fakeSearchIndex{searchFn: func(_ context.Context, q string, _ *meilisearch.SearchRequest) (*meilisearch.SearchResponse, error) {
+		gotQuery = q
+		return &meilisearch.SearchResponse{}, nil
+	}}}
+	if _, err := c.facetSearch(context.Background(), "golang", nil, []string{"source"}); err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "golang" {
+		t.Fatalf("query = %q, want golang", gotQuery)
 	}
 }
