@@ -194,6 +194,16 @@ func main() {
 		startSuggestRefresh(ctx, suggestSvc)
 	}
 
+	// An agent's opt-in semantic search embeds its query against EMBED_URL. Unset, the
+	// embedder is nil and every such request is answered keyword-only and told so — which
+	// is also the rollback. A value that is set but unreadable fails the start: a mistyped
+	// threshold would otherwise look exactly like a tuned one.
+	semanticCfg, err := config.LoadSemanticSearch()
+	if err != nil {
+		log.Fatalf("semantic search: %v", err)
+	}
+	queryEmbedder := search.NewQueryEmbedder(semanticCfg.URL, semanticCfg.APIKey, semanticCfg.QueryTimeout)
+
 	// Résumé storage is optional: only when all four S3 settings are present does
 	// blobstore.New build a client (it returns nil otherwise). Nil disables storage —
 	// résumé upload still extracts skills in-request and the verdict falls back to a
@@ -241,6 +251,15 @@ func main() {
 		log.Fatalf("llm (search intent): %v", err)
 	}
 	defer intentFlush()
+
+	// Parsing a stored CV is the one model call every account gets, paid or not, so it
+	// runs on its own, cheap model rather than on the paid features' choice. Unset falls
+	// back to LLM_MODEL.
+	resumeExtractLLM, resumeExtractFlush, err := llm.NewClient(cfg.Settings(cmp.Or(cfg.ResumeExtractModel, cfg.Model)), "resume-extract")
+	if err != nil {
+		log.Fatalf("llm (resume extract): %v", err)
+	}
+	defer resumeExtractFlush()
 
 	// Dictation runs on the same gateway and the same key as the two clients above —
 	// an OpenAI-compatible endpoint serves /chat/completions and /audio/transcriptions
@@ -344,6 +363,8 @@ func main() {
 		GmailConnector:              gmailConnector,
 		GmailCipher:                 gmailCipher,
 		OJCPSigner:                  ojcpSigner,
+		QueryEmbedder:               queryEmbedder,
+		SemanticScoreThreshold:      semanticCfg.ScoreThreshold,
 		MailboxDomain:               cfg.MailboxDomain,
 		Search:                      searchClient,
 		Suggest:                     suggestSvc,
@@ -354,6 +375,7 @@ func main() {
 		LLM:                         llmClient,
 		AssistantLLM:                assistantLLM,
 		SearchIntentLLM:             intentLLM,
+		ResumeExtractLLM:            resumeExtractLLM,
 		TypesafeAPIKey:              cfg.TypesafeAPIKey,
 		AssistantMaxSteps:           cfg.AssistantMaxSteps,
 		AssistantMaxPrompt:          cfg.AssistantMaxPrompt,

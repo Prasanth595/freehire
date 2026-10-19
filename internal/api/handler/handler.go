@@ -371,6 +371,10 @@ type Config struct {
 	// SearchIntentLLM backs the AI filter. Separate for latency, not capability — see
 	// config.SearchIntentModel.
 	SearchIntentLLM *llm.Client
+	// ResumeExtractLLM backs the structured parse of a stored CV — free for every
+	// account, so on its own cheap model (config.ResumeExtractModel). Nil falls back to
+	// LLM.
+	ResumeExtractLLM *llm.Client
 	// TypesafeAPIKey backs the Jev provider for the autofill agent's Choose call
 	// (autofillagent.JevPlanner). Empty disables it: Choose answers through LLM alone.
 	TypesafeAPIKey string
@@ -415,6 +419,11 @@ type Config struct {
 	// OJCPSigner signs the OJCP manifest. Nil = the manifest is unsigned and no key set is
 	// published.
 	OJCPSigner *ojcp.Signer
+	// QueryEmbedder embeds an agent's query for its opt-in semantic search. Nil = no
+	// embedding backend: such requests are answered keyword-only and say so.
+	QueryEmbedder *search.QueryEmbedder
+	// SemanticScoreThreshold is the ranking-score floor of an agent's hybrid query.
+	SemanticScoreThreshold float64
 	// MailboxDomain enables the hosted-mailbox option: the receiving domain user
 	// addresses live on (<handle>@MailboxDomain). Empty = the feature is off.
 	MailboxDomain string
@@ -577,7 +586,7 @@ func Register(app *fiber.App, cfg Config) {
 	// its reasoning model is slow (tens of seconds per stage), so the default would time
 	// out mid-stage. Nil-safe (a nil client stays nil → Analyze is a no-op).
 	matchAnalyzer := matchanalysis.NewAnalyzer(cfg.LLM.WithTimeout(matchAnalysisLLMTimeout))
-	structuredExtractor := resumeextract.NewExtractor(cfg.LLM.WithTimeout(resumeExtractLLMTimeout), cfg.PIIDetector)
+	structuredExtractor := resumeextract.NewExtractor(cmp.Or(cfg.ResumeExtractLLM, cfg.LLM).WithTimeout(resumeExtractLLMTimeout), cfg.PIIDetector)
 	plans := plan.NewStore(queries, cfg.Pool, cfg.Plan)
 	// Imports fetch a user-supplied page, so they dial through ingestClient (built above,
 	// where the comment on it is). cfg.Search may be nil (no engine configured), which only
@@ -690,6 +699,12 @@ func Register(app *fiber.App, cfg Config) {
 	// same catalogue, or the two answers drift.
 	ojcpH := newOJCPHandlers(jobSearch, queries, cfg.FrontendOrigin, atsapply.SubmittableProviders())
 	ojcpH.signer = cfg.OJCPSigner
+	// Assigned only when set: a nil *search.QueryEmbedder in the interface field would be
+	// a non-nil interface, and the handler's "no backend" check would never fire.
+	if cfg.QueryEmbedder != nil {
+		ojcpH.embedder = cfg.QueryEmbedder
+	}
+	ojcpH.scoreThreshold = cfg.SemanticScoreThreshold
 	// The ChatGPT app's MCP surface. A SECOND MCP server beside the OJCP one, over the same
 	// search backend and the same store: that one renders a foreign schema for agents which
 	// branch on error codes, this one renders ours for a language model reading prose. They
@@ -712,7 +727,7 @@ func Register(app *fiber.App, cfg Config) {
 	geoH := newGeoHandlers()
 	trackingH := newTrackingHandlers(queries, cfg.Pool, jobSearch)
 	timelineH := newTimelineHandlers(queries)
-	resumeH := newResumeHandlers(resumeStore, structuredExtractor, facets, profileSvc, atsAnalyzer, queries, entitlementOf(plans))
+	resumeH := newResumeHandlers(resumeStore, structuredExtractor, facets, profileSvc, atsAnalyzer, queries)
 	photoH := newPhotoHandlers(photoStore)
 	// Same reason as jobSearch above: a nil *speech.Client wrapped in the transcriber
 	// interface would be a non-nil interface, and the handler's "no gateway here"
