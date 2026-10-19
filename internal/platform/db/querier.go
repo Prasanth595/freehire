@@ -6363,6 +6363,9 @@ type Querier interface {
 	// Write one row's countries and regions, for cmd/backfill-remote-region-restriction and
 	// cmd/backfill-region-vocab.
 	//
+	// A nil slice (Derive resolving nothing) encodes as NULL, which the NOT NULL columns
+	// refuse; COALESCE writes it as the empty array the ingest upserts write.
+	//
 	// The IS DISTINCT FROM guard makes the pass idempotent, the same way SetJobWorkMode's
 	// does: a row already carrying the recomputed values is not rewritten, so a re-run writes
 	// nothing and stopping mid-way costs nothing to resume.

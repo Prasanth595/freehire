@@ -4696,11 +4696,11 @@ func (q *Queries) SetJobEnrichment(ctx context.Context, arg SetJobEnrichmentPara
 
 const setJobGeography = `-- name: SetJobGeography :execrows
 UPDATE jobs
-SET countries = $1::text[],
-    regions   = $2::text[]
+SET countries = COALESCE($1::text[], '{}'),
+    regions   = COALESCE($2::text[], '{}')
 WHERE id = $3
-  AND (countries IS DISTINCT FROM $1::text[]
-       OR regions IS DISTINCT FROM $2::text[])
+  AND (countries IS DISTINCT FROM COALESCE($1::text[], '{}')
+       OR regions IS DISTINCT FROM COALESCE($2::text[], '{}'))
 `
 
 type SetJobGeographyParams struct {
@@ -4711,6 +4711,9 @@ type SetJobGeographyParams struct {
 
 // Write one row's countries and regions, for cmd/backfill-remote-region-restriction and
 // cmd/backfill-region-vocab.
+//
+// A nil slice (Derive resolving nothing) encodes as NULL, which the NOT NULL columns
+// refuse; COALESCE writes it as the empty array the ingest upserts write.
 //
 // The IS DISTINCT FROM guard makes the pass idempotent, the same way SetJobWorkMode's
 // does: a row already carrying the recomputed values is not rewritten, so a re-run writes

@@ -2598,15 +2598,18 @@ WHERE id = ANY(sqlc.arg(ids)::bigint[]);
 -- Write one row's countries and regions, for cmd/backfill-remote-region-restriction and
 -- cmd/backfill-region-vocab.
 --
+-- A nil slice (Derive resolving nothing) encodes as NULL, which the NOT NULL columns
+-- refuse; COALESCE writes it as the empty array the ingest upserts write.
+--
 -- The IS DISTINCT FROM guard makes the pass idempotent, the same way SetJobWorkMode's
 -- does: a row already carrying the recomputed values is not rewritten, so a re-run writes
 -- nothing and stopping mid-way costs nothing to resume.
 UPDATE jobs
-SET countries = sqlc.arg(countries)::text[],
-    regions   = sqlc.arg(regions)::text[]
+SET countries = COALESCE(sqlc.arg(countries)::text[], '{}'),
+    regions   = COALESCE(sqlc.arg(regions)::text[], '{}')
 WHERE id = sqlc.arg(id)
-  AND (countries IS DISTINCT FROM sqlc.arg(countries)::text[]
-       OR regions IS DISTINCT FROM sqlc.arg(regions)::text[]);
+  AND (countries IS DISTINCT FROM COALESCE(sqlc.arg(countries)::text[], '{}')
+       OR regions IS DISTINCT FROM COALESCE(sqlc.arg(regions)::text[], '{}'));
 
 -- name: RequirementsDerivedBackfillBounds :one
 -- The id span cmd/backfill-requirements walks. MIN/MAX over the primary key are two
