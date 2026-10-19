@@ -719,6 +719,14 @@ type Querier interface {
 	// that no longer exists). Candidate contacts are intentionally kept: they are
 	// owner-edited identity, not an extract artifact.
 	ClearUserResume(ctx context.Context, id int64) error
+	// Close every open posting of ONE board on the source's own answer about the board, given by
+	// the caller as closed_reason — cmd/rekey-gupy-boards' close for a Gupy career page that
+	// answers an empty listing ('feed_empty': reachable, and the feed carried nothing) or 404
+	// "Career Page not Found" ('board_unreachable'). The ordinary paths cannot reach either: a
+	// zero-yield crawl licenses no sweep, the empty-feed pass refuses a board with no recorded
+	// yield, and the chronic pass waits 60 days. jobs_closed_reason_check bounds the values. The
+	// search_delete_outbox CTE rides the statement as in CloseEmptyFeedBoardJobs.
+	CloseBoardJobsWithReason(ctx context.Context, arg CloseBoardJobsWithReasonParams) (int64, error)
 	// The chronic-board safety net (openspec change close-chronically-unreachable-boards, issue
 	// #2017), board-scoped: closes every open job of ONE board that board_health.ListChronicBoards
 	// has already proven unreachable for the closure window — no per-run cutoff, because the
@@ -4008,6 +4016,11 @@ type Querier interface {
 	// nothing else. One round trip for the whole list; an unknown slug is simply absent, which the
 	// caller reports as not found.
 	ListJobLivenessBySlugs(ctx context.Context, slugs []string) ([]ListJobLivenessBySlugsRow, error)
+	// Every board namespace (the part of external_id before ':') one source's stored postings
+	// carry, with the company most of them name. cmd/rekey-gupy-boards reads it AFTER moving
+	// postings to their new namespaces, so the boards it then adds are derived from the data
+	// itself rather than from a plan an interrupted run could lose.
+	ListJobNamespacesForSource(ctx context.Context, source string) ([]ListJobNamespacesForSourceRow, error)
 	// One chunk of the skill-gap report: every (job id, raw skill phrase) pair LLM
 	// enrichment recorded, for jobs in an id range.
 	//

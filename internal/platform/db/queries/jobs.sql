@@ -2909,3 +2909,39 @@ FROM v
 WHERE j.id = v.id
   AND j.source = sqlc.arg(source)
   AND j.external_id IS DISTINCT FROM v.external_id;
+
+-- name: ListJobNamespacesForSource :many
+-- Every board namespace (the part of external_id before ':') one source's stored postings
+-- carry, with the company most of them name. cmd/rekey-gupy-boards reads it AFTER moving
+-- postings to their new namespaces, so the boards it then adds are derived from the data
+-- itself rather than from a plan an interrupted run could lose.
+SELECT split_part(external_id, ':', 1)::text AS namespace,
+       (mode() WITHIN GROUP (ORDER BY company))::text AS company
+FROM jobs
+WHERE source = sqlc.arg(source)
+GROUP BY 1
+ORDER BY 1;
+
+-- name: CloseBoardJobsWithReason :one
+-- Close every open posting of ONE board on the source's own answer about the board, given by
+-- the caller as closed_reason — cmd/rekey-gupy-boards' close for a Gupy career page that
+-- answers an empty listing ('feed_empty': reachable, and the feed carried nothing) or 404
+-- "Career Page not Found" ('board_unreachable'). The ordinary paths cannot reach either: a
+-- zero-yield crawl licenses no sweep, the empty-feed pass refuses a board with no recorded
+-- yield, and the chronic pass waits 60 days. jobs_closed_reason_check bounds the values. The
+-- search_delete_outbox CTE rides the statement as in CloseEmptyFeedBoardJobs.
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = sqlc.arg(closed_reason)::text,
+        updated_at    = now()
+    WHERE closed_at IS NULL
+      AND source = sqlc.arg(source)
+      AND external_id LIKE sqlc.arg(board_pattern)
+    RETURNING id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed;

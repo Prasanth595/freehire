@@ -260,6 +260,44 @@ func (q *Queries) ClassifyDriftReportBounds(ctx context.Context) (ClassifyDriftR
 	return i, err
 }
 
+const closeBoardJobsWithReason = `-- name: CloseBoardJobsWithReason :one
+WITH closed AS (
+    UPDATE jobs
+    SET closed_at     = now(),
+        closed_reason = $1::text,
+        updated_at    = now()
+    WHERE closed_at IS NULL
+      AND source = $2
+      AND external_id LIKE $3
+    RETURNING id
+), queued AS (
+    INSERT INTO search_delete_outbox (job_id)
+    SELECT id FROM closed
+    ON CONFLICT (job_id) DO NOTHING
+)
+SELECT count(*) FROM closed
+`
+
+type CloseBoardJobsWithReasonParams struct {
+	ClosedReason string `json:"closed_reason"`
+	Source       string `json:"source"`
+	BoardPattern string `json:"board_pattern"`
+}
+
+// Close every open posting of ONE board on the source's own answer about the board, given by
+// the caller as closed_reason — cmd/rekey-gupy-boards' close for a Gupy career page that
+// answers an empty listing ('feed_empty': reachable, and the feed carried nothing) or 404
+// "Career Page not Found" ('board_unreachable'). The ordinary paths cannot reach either: a
+// zero-yield crawl licenses no sweep, the empty-feed pass refuses a board with no recorded
+// yield, and the chronic pass waits 60 days. jobs_closed_reason_check bounds the values. The
+// search_delete_outbox CTE rides the statement as in CloseEmptyFeedBoardJobs.
+func (q *Queries) CloseBoardJobsWithReason(ctx context.Context, arg CloseBoardJobsWithReasonParams) (int64, error) {
+	row := q.db.QueryRow(ctx, closeBoardJobsWithReason, arg.ClosedReason, arg.Source, arg.BoardPattern)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
+}
+
 const closeChronicBoardJobs = `-- name: CloseChronicBoardJobs :one
 WITH closed AS (
     UPDATE jobs
@@ -2907,6 +2945,44 @@ func (q *Queries) ListJobLivenessBySlugs(ctx context.Context, slugs []string) ([
 			&i.ClosedAt,
 			&i.LastSeenAt,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listJobNamespacesForSource = `-- name: ListJobNamespacesForSource :many
+SELECT split_part(external_id, ':', 1)::text AS namespace,
+       (mode() WITHIN GROUP (ORDER BY company))::text AS company
+FROM jobs
+WHERE source = $1
+GROUP BY 1
+ORDER BY 1
+`
+
+type ListJobNamespacesForSourceRow struct {
+	Namespace string `json:"namespace"`
+	Company   string `json:"company"`
+}
+
+// Every board namespace (the part of external_id before ':') one source's stored postings
+// carry, with the company most of them name. cmd/rekey-gupy-boards reads it AFTER moving
+// postings to their new namespaces, so the boards it then adds are derived from the data
+// itself rather than from a plan an interrupted run could lose.
+func (q *Queries) ListJobNamespacesForSource(ctx context.Context, source string) ([]ListJobNamespacesForSourceRow, error) {
+	rows, err := q.db.Query(ctx, listJobNamespacesForSource, source)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListJobNamespacesForSourceRow{}
+	for rows.Next() {
+		var i ListJobNamespacesForSourceRow
+		if err := rows.Scan(&i.Namespace, &i.Company); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

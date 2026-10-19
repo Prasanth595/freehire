@@ -12,29 +12,41 @@
 //
 // WHERE THE MAPPING COMES FROM. Every stored posting's URL names the career page it was
 // published on (https://<page>.gupy.io/job/...), so the companyId -> pages mapping is read
-// from the catalogue itself, with no request to Gupy.
+// from the catalogue itself.
 //
-// WHAT IT WRITES, per companyId board, in ONE transaction:
-//  1. each posting's external_id "<companyId>:<job id>" becomes "<page>:<job id>" — the row
-//     keeps its id, so saves, tracking, enrichment and views follow it, and the first crawl of
-//     the new board UPDATES the posting instead of inserting a duplicate beside it;
-//  2. one board per page (status 'pending', company copied from the old board), through
-//     boardcatalog's Inserter — a page a previous board already created is skipped;
-//  3. the companyId board is retired.
+// TWO PASSES, and the split is load-bearing.
 //
-// The order inside the transaction is what makes a crawl racing the run harmless: a new board
-// is not visible to the crawler until its postings already carry its namespace. A companyId
-// board is retired even when none of its postings names a page — a numeric key can never be
-// crawled again — and is listed in the report so a curator can re-add the company by page.
+// Pass 1, per companyId board in ONE transaction: each posting's external_id
+// "<companyId>:<job id>" becomes "<page>:<job id>" (the row keeps its id, so saves, tracking,
+// enrichment and views follow it, and the first crawl of the page UPDATES the posting instead
+// of inserting a duplicate beside it), and the companyId board is retired. Pass 1 creates
+// nothing a crawler can see.
 //
-// WHAT CLOSES THE STALE POSTINGS. Nothing here closes anything. gupy is now a
-// fullBoardListing adapter, so the first successful crawl of each new board closes, through
-// the ordinary board-scoped sweep, every posting of that page the listing no longer carries —
-// all of them last seen 2026-09-30, far past the 48h grace. Postings on a page that no longer
-// exists (Gupy answers 404 "Career Page not Found") are left to close-chronic-boards.
+// Pass 2, only once EVERY companyId board has moved: one 'pending' board per page namespace
+// the stored postings now carry, through boardcatalog's Inserter. Adding a page board before
+// all its postings were moved would be a race, because one page can be shared by two
+// companyIds (datalawyer: 41023 and 68685): a crawl of the new board between the two moves
+// writes fresh "<page>:<id>" rows, and the second move then collides on (source, external_id)
+// forever. So a failed board in pass 1 skips pass 2 entirely, and the run exits non-zero
+// naming every board that failed. Pass 2 reads its pages back from the data rather than from
+// pass 1's plan, so a re-run after a fix picks up exactly what is still missing.
 //
-// Reports by default; --apply writes. Idempotent: a moved board is retired, so a re-run reads
-// only what is left. Needs only DATABASE_URL.
+// WHAT CLOSES THE STALE POSTINGS. gupy is now a fullBoardListing adapter, so the first
+// successful crawl of a page board closes, through the ordinary board-scoped sweep, every
+// posting the page no longer lists — all last seen 2026-09-30, far past the 48h grace. Two
+// kinds of page that sweep can never reach are closed here, in pass 2, on Gupy's own answer:
+//   - a page that lists nothing ({"data":[]}): a zero-yield crawl licenses no sweep, and the
+//     empty-feed pass in close-chronic-boards both refuses a board with no recorded yield and
+//     runs report-only on prod (its unit passes --apply, never --apply-empty-feed). Its open
+//     postings close as 'feed_empty'; the board is still added, the page being live.
+//   - a page Gupy answers 404 "Career Page not Found" for: its open postings close as
+//     'board_unreachable' and no board is added — one would fail every crawl.
+//
+// Both closes queue search_delete_outbox in the same statement. A page whose probe fails any
+// other way is added as a board and closes nothing.
+//
+// Reports by default; --apply writes. Idempotent: a moved board is retired and a page with a
+// live board is skipped. Needs only DATABASE_URL, and pass 2 reaches private-api.gupy.io.
 package main
 
 import (
@@ -43,6 +55,8 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
@@ -57,6 +71,10 @@ import (
 
 const provider = "gupy"
 
+// gupyListURL lists one career page's published postings (mirrors sources.gupyJobsURL, which
+// is unexported).
+const gupyListURL = "https://private-api.gupy.io/job-publication/public/jobs"
+
 func main() { worker.Main(run) }
 
 func run() int {
@@ -70,81 +88,106 @@ func run() int {
 	}
 	defer cleanup()
 
-	if err := rekey(ctx, pool, *apply); err != nil {
+	if err := rekey(ctx, pool, gupyLister{http: sources.NewClient()}, *apply); err != nil {
 		log.Printf("rekey-gupy-boards: %v", err)
 		return 1
 	}
 	return 0
 }
 
-// totals is the run's report.
-type totals struct {
-	boards, moved, pagesAdded, pagesExisting, postings, unplaced int
-	noPages                                                      []string
+// pageLister asks Gupy how many postings a career page publishes. An error wrapping a
+// *sources.StatusError with code 404 is Gupy's "Career Page not Found".
+type pageLister interface {
+	listed(ctx context.Context, page string) (int, error)
 }
 
-func rekey(ctx context.Context, pool *pgxpool.Pool, apply bool) error {
-	boards, err := boardcatalog.NewQueriesRepository(db.New(pool)).ListActiveForProvider(ctx, provider)
-	if err != nil {
-		return fmt.Errorf("list boards: %w", err)
-	}
-	registry := sources.Taxonomy()
+type gupyLister struct{ http sources.JSONGetter }
 
-	var t totals
+func (g gupyLister) listed(ctx context.Context, page string) (int, error) {
+	var resp struct {
+		Data []struct {
+			ID int64 `json:"id"`
+		} `json:"data"`
+	}
+	if err := g.http.GetJSON(ctx, gupyListURL+"?subdomain="+url.QueryEscape(page), &resp); err != nil {
+		return 0, err
+	}
+	return len(resp.Data), nil
+}
+
+func rekey(ctx context.Context, pool *pgxpool.Pool, lister pageLister, apply bool) error {
+	failed, err := movePostings(ctx, pool, apply)
+	if err != nil {
+		return err
+	}
+	if !apply {
+		log.Print("dry run, nothing written. Re-run with --apply to move the boards.")
+		return nil
+	}
+	if len(failed) > 0 {
+		return fmt.Errorf("%d boards failed to move, page boards NOT added (fix and re-run): %s",
+			len(failed), strings.Join(failed, "; "))
+	}
+	return addPageBoards(ctx, pool, lister)
+}
+
+// movePostings is pass 1. It returns the boards whose move failed; a failure is logged and the
+// run continues with the next board, so one bad board does not hide the state of the rest.
+func movePostings(ctx context.Context, pool *pgxpool.Pool, apply bool) (failed []string, err error) {
+	q := db.New(pool)
+	boards, err := boardcatalog.NewQueriesRepository(q).ListActiveForProvider(ctx, provider)
+	if err != nil {
+		return nil, fmt.Errorf("list boards: %w", err)
+	}
+
+	var seen, moved, postings, unplaced int
+	var noPages []string
 	for _, b := range boards {
 		if !isCompanyIDBoard(b.Board) {
 			continue
 		}
-		rows, err := db.New(pool).ListBoardJobURLs(ctx, db.ListBoardJobURLsParams{
+		rows, err := q.ListBoardJobURLs(ctx, db.ListBoardJobURLsParams{
 			Source: provider, BoardPattern: externalid.BoardPattern(b.Board),
 		})
 		if err != nil {
-			return fmt.Errorf("board %s: list postings: %w", b.Board, err)
+			return nil, fmt.Errorf("board %s: list postings: %w", b.Board, err)
 		}
 		plan := planBoard(b.Board, rows)
 		if plan.alreadyMoved {
 			continue
 		}
-		t.boards++
-		t.postings += len(plan.ids)
-		t.unplaced += plan.unplaced
+		seen++
+		postings += len(plan.ids)
+		unplaced += plan.unplaced
 		if len(plan.pages) == 0 {
-			t.noPages = append(t.noPages, fmt.Sprintf("%s (%s)", b.Board, b.Company))
+			noPages = append(noPages, fmt.Sprintf("%s (%s)", b.Board, b.Company))
 		}
 		log.Printf("board %s (%s): %d postings -> pages [%s], %d unplaced",
 			b.Board, b.Company, len(plan.ids), strings.Join(plan.pages, " "), plan.unplaced)
 		if !apply {
 			continue
 		}
-		added, existing, err := moveBoard(ctx, pool, registry, b, plan)
-		if err != nil {
-			return fmt.Errorf("board %s: %w", b.Board, err)
+		if err := moveBoard(ctx, pool, b, plan); err != nil {
+			log.Printf("board %s: FAILED: %v", b.Board, err)
+			failed = append(failed, fmt.Sprintf("%s: %v", b.Board, err))
+			continue
 		}
-		t.moved++
-		t.pagesAdded += added
-		t.pagesExisting += existing
+		moved++
 	}
 
-	log.Printf("companyId boards: %d; postings re-keyed: %d; postings naming no page: %d",
-		t.boards, t.postings, t.unplaced)
-	if len(t.noPages) > 0 {
+	log.Printf("pass 1: %d companyId boards, %d moved, %d failed; %d postings re-keyed, %d naming no page",
+		seen, moved, len(failed), postings, unplaced)
+	if len(noPages) > 0 {
 		log.Printf("boards with no career page in the catalogue (retired, re-add by page if wanted): %s",
-			strings.Join(t.noPages, ", "))
+			strings.Join(noPages, ", "))
 	}
-	if !apply {
-		log.Print("dry run, nothing written. Re-run with --apply to move the boards.")
-		return nil
-	}
-	log.Printf("moved %d boards: %d career-page boards added, %d already existed", t.moved, t.pagesAdded, t.pagesExisting)
-	return nil
+	return failed, nil
 }
 
-// moveBoard applies one board's plan in a single transaction: re-key its postings, add a
-// board per career page, retire the companyId board. It returns how many page boards it added
-// and how many already existed.
-func moveBoard(ctx context.Context, pool *pgxpool.Pool, registry map[string]sources.Source,
-	b boardcatalog.Board, plan boardPlan) (added, existing int, err error) {
-	err = pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
+// moveBoard applies one board's plan in a single transaction: re-key its postings and retire
+// the companyId board.
+func moveBoard(ctx context.Context, pool *pgxpool.Pool, b boardcatalog.Board, plan boardPlan) error {
+	return pgx.BeginFunc(ctx, pool, func(tx pgx.Tx) error {
 		q := db.New(tx)
 		if len(plan.ids) > 0 {
 			if _, err := q.RekeyJobExternalIDs(ctx, db.RekeyJobExternalIDsParams{
@@ -153,30 +196,100 @@ func moveBoard(ctx context.Context, pool *pgxpool.Pool, registry map[string]sour
 				return fmt.Errorf("re-key postings: %w", err)
 			}
 		}
-		repo := boardcatalog.NewQueriesRepository(q)
-		inserter := boardcatalog.NewInserter(repo, registry)
-		for _, page := range plan.pages {
-			nb, err := inserter.Insert(ctx, boardcatalog.InsertInput{
-				Provider: provider, Board: page, Region: b.Region, Company: b.Company,
-			}, boardcatalog.StatusPending)
-			switch {
-			case errors.Is(err, boardcatalog.ErrDuplicateBoard):
-				existing++
-			case err != nil:
-				return fmt.Errorf("add page %s: %w", page, err)
-			case nb.Status == boardcatalog.StatusRejected:
-				return fmt.Errorf("add page %s: rejected: %s", page, nb.RejectedReason)
-			default:
-				added++
-			}
-		}
-		if _, err := repo.Retire(ctx, provider, b.Board, b.Region); err != nil {
+		if _, err := boardcatalog.NewQueriesRepository(q).Retire(ctx, provider, b.Board, b.Region); err != nil {
 			return fmt.Errorf("retire: %w", err)
 		}
 		return nil
 	})
+}
+
+// addPageBoards is pass 2: a board for every page namespace the stored postings carry that has
+// no live board yet, with the stale postings of an empty or vanished page closed on Gupy's own
+// answer (see the package comment).
+func addPageBoards(ctx context.Context, pool *pgxpool.Pool, lister pageLister) error {
+	q := db.New(pool)
+	repo := boardcatalog.NewQueriesRepository(q)
+	live, err := repo.ListActiveForProvider(ctx, provider)
 	if err != nil {
-		return 0, 0, err
+		return fmt.Errorf("list boards: %w", err)
 	}
-	return added, existing, nil
+	hasBoard := map[string]bool{}
+	for _, b := range live {
+		hasBoard[strings.ToLower(b.Board)] = true
+	}
+	namespaces, err := q.ListJobNamespacesForSource(ctx, provider)
+	if err != nil {
+		return fmt.Errorf("list namespaces: %w", err)
+	}
+
+	inserter := boardcatalog.NewInserter(repo, sources.Taxonomy())
+	var added, empty, gone, unprobed int
+	var closedEmpty, closedGone int64
+	var failed []string
+	for _, ns := range namespaces {
+		page := ns.Namespace
+		// An all-digit namespace is the old companyId key: postings no URL placed.
+		if page == "" || isCompanyIDBoard(page) || hasBoard[strings.ToLower(page)] {
+			continue
+		}
+		n, probeErr := lister.listed(ctx, page)
+		var se *sources.StatusError
+		switch {
+		case errors.As(probeErr, &se) && se.Code == http.StatusNotFound:
+			closed, err := closePage(ctx, q, page, "board_unreachable")
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s: %v", page, err))
+				continue
+			}
+			gone++
+			closedGone += closed
+			log.Printf("page %s: career page not found, %d open postings closed, no board added", page, closed)
+			continue
+		case probeErr != nil:
+			unprobed++
+			log.Printf("page %s: probe failed (%v), adding the board and closing nothing", page, probeErr)
+		case n == 0:
+			closed, err := closePage(ctx, q, page, "feed_empty")
+			if err != nil {
+				failed = append(failed, fmt.Sprintf("%s: %v", page, err))
+				continue
+			}
+			empty++
+			closedEmpty += closed
+			log.Printf("page %s: publishes nothing, %d open postings closed", page, closed)
+		}
+		company := ns.Company
+		if company == "" {
+			company = page
+		}
+		nb, err := inserter.Insert(ctx, boardcatalog.InsertInput{
+			Provider: provider, Board: page, Company: company,
+		}, boardcatalog.StatusPending)
+		switch {
+		case errors.Is(err, boardcatalog.ErrDuplicateBoard):
+		case err != nil:
+			failed = append(failed, fmt.Sprintf("%s: add board: %v", page, err))
+		case nb.Status == boardcatalog.StatusRejected:
+			failed = append(failed, fmt.Sprintf("%s: add board: rejected: %s", page, nb.RejectedReason))
+		default:
+			added++
+		}
+	}
+
+	log.Printf("pass 2: %d page boards added (%d of them empty, %d postings closed feed_empty; %d unprobed); "+
+		"%d pages gone, %d postings closed board_unreachable", added, empty, closedEmpty, unprobed, gone, closedGone)
+	if len(failed) > 0 {
+		return fmt.Errorf("%d pages failed (re-run to retry): %s", len(failed), strings.Join(failed, "; "))
+	}
+	return nil
+}
+
+func closePage(ctx context.Context, q *db.Queries, page, reason string) (int64, error) {
+	closed, err := q.CloseBoardJobsWithReason(ctx, db.CloseBoardJobsWithReasonParams{
+		ClosedReason: reason, Source: provider, BoardPattern: externalid.BoardPattern(page),
+	})
+	if err != nil {
+		return 0, fmt.Errorf("close %s: %w", reason, err)
+	}
+	return closed, nil
 }
