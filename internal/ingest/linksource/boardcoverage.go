@@ -167,7 +167,7 @@ func pickPosting(jobs []sources.Job, raw string) (sources.Job, bool) {
 			if j.Unreadable {
 				continue
 			}
-			if j.ExternalID != "" && j.ExternalID == seg {
+			if segmentNamesID(seg, j.ExternalID) {
 				return j, true
 			}
 		}

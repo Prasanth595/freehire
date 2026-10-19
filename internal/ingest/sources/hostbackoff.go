@@ -25,8 +25,9 @@ const (
 // platform says so — and boards the run then never reaches keep their last state instead of
 // recording a failure each.
 //
-// Consecutive refusals double the hold up to max; a served response resets the escalation (it
-// does not shorten a hold already set, which other workers are already waiting out).
+// A refusal after a hold has expired doubles the next hold, up to max; the refusals of one burst
+// count once. A served response resets the escalation (it does not shorten a hold already set,
+// which other workers are already waiting out).
 type hostBackoff struct {
 	base, max time.Duration
 	now       func() time.Time
@@ -55,6 +56,11 @@ func (b *hostBackoff) wait(ctx context.Context, host string) error {
 	for {
 		b.mu.Lock()
 		d := b.until[host].Sub(b.now())
+		if d <= 0 {
+			// Forget an expired hold: the Client in cmd/server lives for days and meets
+			// many hosts, and the map must not keep every one it ever held.
+			delete(b.until, host)
+		}
 		b.mu.Unlock()
 		if d <= 0 {
 			return nil
@@ -73,12 +79,25 @@ func (b *hostBackoff) wait(ctx context.Context, host string) error {
 
 // refused records a 429 from host. hint is the server's Retry-After (0 when absent); the hold
 // is the longer of it and the escalation, and never shortens an existing hold.
+//
+// Only a refusal arriving after the current hold has EXPIRED escalates. The refusals that land
+// while a hold is running are one burst — every worker with a request in flight draws its 429
+// at the same moment — and counting each would jump the first hold straight to the cap, then
+// release every worker together when it ran out. Such a refusal may still lengthen the hold
+// with its own Retry-After.
 func (b *hostBackoff) refused(host string, hint time.Duration) {
 	if b == nil {
 		return
 	}
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	now := b.now()
+	if b.until[host].After(now) {
+		if until := now.Add(hint); until.After(b.until[host]) {
+			b.until[host] = until
+		}
+		return
+	}
 	d := b.base << b.streak[host]
 	if d > b.max || d <= 0 { // d<=0 guards the shift overflowing on a long streak
 		d = b.max
@@ -88,9 +107,7 @@ func (b *hostBackoff) refused(host string, hint time.Duration) {
 	if hint > d {
 		d = hint
 	}
-	if until := b.now().Add(d); until.After(b.until[host]) {
-		b.until[host] = until
-	}
+	b.until[host] = now.Add(d)
 }
 
 // served records a successful response from host, resetting its escalation.

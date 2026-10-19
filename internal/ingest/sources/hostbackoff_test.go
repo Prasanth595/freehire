@@ -48,6 +48,7 @@ func TestHostBackoffEscalatesAndResets(t *testing.T) {
 		if got := b.until["h"].Sub(now); got != w*time.Millisecond {
 			t.Fatalf("refusal %d: hold = %v, want %v", i+1, got, w*time.Millisecond)
 		}
+		now = now.Add(w * time.Millisecond) // the next refusal arrives as this hold expires
 	}
 
 	b.served("h")
@@ -124,5 +125,51 @@ func TestClientHoldsConcurrentRequestsAfterA429(t *testing.T) {
 		if gap := hitTimes[i].Sub(hitTimes[0]); gap < hold-10*time.Millisecond {
 			t.Errorf("request %d went out %v after the 429, want >= %v", i+1, gap, hold)
 		}
+	}
+}
+
+// A burst is ONE refusal. Eight board workers with detail requests in flight all draw their
+// 429 at the same moment; counting each would jump straight to the cap, and every worker would
+// then fire together when it expired. Only a refusal arriving after the hold has run out is
+// evidence the host is still refusing, so only that one escalates.
+func TestHostBackoffBurstInsideOneHoldIsOneStep(t *testing.T) {
+	b := newHostBackoff(10*time.Millisecond, time.Minute)
+	now := time.Now()
+	b.now = func() time.Time { return now }
+
+	var wg sync.WaitGroup
+	for range 16 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			b.refused("h", 0)
+		}()
+	}
+	wg.Wait()
+	if got := b.until["h"].Sub(now); got != 10*time.Millisecond {
+		t.Fatalf("hold after a burst = %v, want the base 10ms", got)
+	}
+
+	now = now.Add(10 * time.Millisecond) // the hold expires, and the host refuses again
+	b.refused("h", 0)
+	if got := b.until["h"].Sub(now); got != 20*time.Millisecond {
+		t.Errorf("hold after the next refusal = %v, want one doubling to 20ms", got)
+	}
+}
+
+// The Client in cmd/server lives for days and meets many hosts; an expired hold must not stay
+// in the map for ever.
+func TestHostBackoffForgetsAnExpiredHold(t *testing.T) {
+	b := newHostBackoff(10*time.Millisecond, time.Minute)
+	now := time.Now()
+	b.now = func() time.Time { return now }
+
+	b.refused("h", 0)
+	now = now.Add(time.Second)
+	if err := b.wait(context.Background(), "h"); err != nil {
+		t.Fatalf("wait: %v", err)
+	}
+	if _, ok := b.until["h"]; ok {
+		t.Error("an expired hold is still in the map")
 	}
 }
