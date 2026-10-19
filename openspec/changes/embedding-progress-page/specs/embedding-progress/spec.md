@@ -3,8 +3,9 @@
 ### Requirement: Coverage is measured off the request path
 The system SHALL measure semantic-embedding coverage in `cmd/rollup-stats` and publish
 it as a snapshot in the cache. A posting is **eligible** when it is open
-(`closed_at IS NULL`), canonical (`duplicate_of IS NULL`) and technical
-(`is_tech IS TRUE`) — the same gate `EnqueuePendingSemanticJobs` applies. An eligible
+(`closed_at IS NULL`), canonical (`duplicate_of IS NULL`), technical
+(`is_tech IS TRUE`) and public (`NOT is_private`) — the gate `EnqueuePendingSemanticJobs`
+applies, less the private postings it also embeds, which no public figure may count. An eligible
 posting is **covered** when `semantic_embedded_model` equals the current embedder model
 and `semantic_embedded_hash` is not distinct from its `content_hash`. No HTTP request
 SHALL count eligible or covered postings.
