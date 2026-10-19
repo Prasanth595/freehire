@@ -1,0 +1,33 @@
+Step-by-step code for each task: `docs/superpowers/plans/2026-10-18-search-query-operators.md`.
+
+## 1. Query parser
+
+- [ ] 1.1 Write the failing `ParseQuery` table tests in `internal/search/search/query_syntax_test.go` (no-operator passthrough, lowercase `or`, quoted `OR`, minus, `title:` placements, empty alternatives, five allowed, six refused).
+- [ ] 1.2 Implement `Alternative`, `ParseQuery`, `ErrTooManyAlternatives` in `internal/search/search/query_syntax.go`.
+
+## 2. Federated hits
+
+- [ ] 2.1 Add `fakeManager` to `testhelpers_test.go` and write the failing `federated_test.go` tests: per-query filter/sort/fields, no per-query limit/offset, no-operator single request, single `title:` stays single-index, OR goes federated, too many refused.
+- [ ] 2.2 Implement `buildFederatedSearch` (`federated.go`) and route `Client.Search` through `ParseQuery`.
+- [ ] 2.3 Render `ErrTooManyAlternatives` as a 400 with its own message in `internal/api/handler/errors.go`.
+
+## 3. Facet counts under OR
+
+- [ ] 3.1 Write the failing tests: merged facets carry `maxValuesPerFacet`, no per-query facets, the federated response converts to `FacetResult`, no-operator facets stay single-index.
+- [ ] 3.2 Implement `buildFederatedFacets`, `federatedAsSearchResponse` and `Client.facetSearch`, and route `FacetCounts` and `DisjunctiveFacetCounts` through it.
+
+## 4. Real engine
+
+- [ ] 4.1 Pin `startMeili` to `getmeili/meilisearch:v1.49.0` and confirm that the existing integration suite passes.
+- [ ] 4.2 Add `TestSearchOperatorsOnRealEngine`: `title:` + minus, OR dedup and global sort, paging, merged facets, disjunctive facets.
+
+## 5. Docs
+
+- [ ] 5.1 Rewrite the `Q` description in `web/static/openapi.yaml`.
+- [ ] 5.2 Add a "Query operators" section to `internal/search/search/AGENTS.md`.
+
+## 6. Ship
+
+- [ ] 6.1 Full gate: gofmt, vet (plain and integration), unit tests, the search integration suite.
+- [ ] 6.2 PR → CI → merge → deploy, then the live check.
+- [ ] 6.3 PR to MadsLorentzen/ai-job-search saying that freehire honours the operators.
