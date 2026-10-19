@@ -31,11 +31,10 @@ var regionAliases = map[string][]string{
 // NormalizeRegions folds a structured region signal into vocab.RegionValues. A
 // canonical value is kept; a country (code, alpha-3 or name) or a country-prefixed
 // subdivision code of one to three letters or digits ("us-fl", "ru-mow") folds into
-// its country's region; a macro-region
-// name or a regionAliases label resolves to the region(s) it names. Anything else —
-// a timezone band, an exclusion phrase, a placeholder — is dropped, the same
-// never-guess contract Parse keeps. The result is deduplicated and sorted; nil when
-// nothing resolves.
+// its country's region; a macro-region name or a regionAliases label resolves to the
+// region(s) it names. Anything else — a timezone band, an exclusion phrase, a
+// placeholder — is dropped, the same never-guess contract Parse keeps. The result is
+// deduplicated and sorted; nil when nothing resolves.
 func NormalizeRegions(in []string) []string {
 	set := make(map[string]struct{}, len(in))
 	for _, raw := range in {
