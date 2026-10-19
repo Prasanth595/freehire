@@ -367,6 +367,30 @@ func TestRunRecordsAnEmptyCompanyDescription(t *testing.T) {
 	}
 }
 
+// TestRunCompanyDescriptionUsesTheCanonicalSlug proves the due-check and the write both go
+// through canonicalOf, like the posting upsert. A board whose company a merge retired must
+// not insert a 0-job row under the retired slug — that row would shadow the alias redirect —
+// and the canonical company is the one that should get the description.
+func TestRunCompanyDescriptionUsesTheCanonicalSlug(t *testing.T) {
+	src := &fakeDescriberSource{
+		fakeSource:  fakeSource{provider: "workable", jobs: []sources.Job{{ExternalID: "1", Title: "A", Company: "Dollartree", URL: "u"}}},
+		description: "",
+	}
+	store := &fakeStore{}
+	aliases := &fakeAliases{canon: map[string]string{"dollartree": "dollar-tree"}}
+	r := Runner{Registry: registry(src), Store: store, Aliases: aliases}
+
+	if _, err := r.Run(context.Background(), []sources.CompanyEntry{
+		{Company: "Dollartree", Provider: "workable", Board: "dollartree"},
+	}); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	want := filledDescription{slug: "dollar-tree", name: "Dollartree", description: ""}
+	if len(store.filled) != 1 || store.filled[0] != want {
+		t.Errorf("recorded = %+v, want exactly %+v (the canonical slug, not the retired one)", store.filled, want)
+	}
+}
+
 // TestRunSkipsCompanyDescriptionWhenNotDue proves the runner asks the Store first and
 // makes NO request when the company is not due — it already holds a description, or it
 // was checked inside the refresh window. Measured on prod 2026-10-19, fetching it on

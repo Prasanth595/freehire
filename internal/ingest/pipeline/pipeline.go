@@ -609,7 +609,10 @@ func (r Runner) fillCompanyDescription(ctx context.Context, e sources.CompanyEnt
 	if !ok {
 		return
 	}
-	slug := normalize.CompanySlug(e.Company)
+	// Through canonicalOf, like the posting upsert: a board whose company a merge retired must
+	// not write (or insert a 0-job row) under the retired slug, which would shadow the alias
+	// redirect and leave the canonical company without the description.
+	slug := canonicalOf(r.streamCompanyCanonical(ctx, e), normalize.CompanySlug(e.Company))
 	due, err := filler.CompanyDescriptionDue(ctx, slug, time.Now().Add(-CompanyDescriptionRefreshWindow))
 	if err != nil {
 		log.Printf("ingest: %s board %q (%s): company description due-check: %v", e.Provider, e.Board, e.Company, err)
@@ -819,7 +822,8 @@ func (r Runner) resolveCompanyAliases(ctx context.Context, e sources.CompanyEntr
 // streamCompanyCanonical is resolveCompanyAliases for a streaming board, which has no upfront
 // batch: it resolves one company as it is first seen and memoizes the answer. Like
 // streamAggregatorCoverage it is only ever called from ingestStream's emit callback, already
-// serialized under that path's own mutex, so the cache needs no lock.
+// serialized under that path's own mutex, so the cache needs no lock. fillCompanyDescription
+// also builds one for the single slug it resolves, on its own goroutine.
 func (r Runner) streamCompanyCanonical(ctx context.Context, e sources.CompanyEntry) companyCanonical {
 	if r.Aliases == nil {
 		return nil
