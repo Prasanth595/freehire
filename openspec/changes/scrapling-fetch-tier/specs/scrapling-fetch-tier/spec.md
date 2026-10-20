@@ -1,0 +1,101 @@
+## ADDED Requirements
+
+### Requirement: Fetch service contract
+The Scrapling fetch service SHALL accept `POST /fetch` with a JSON body naming `url`, `method`,
+`headers`, `body`, `mode` (`http` or `browser`) and `proxy` (boolean), and SHALL answer a
+completed fetch with HTTP 200 and a JSON body carrying the upstream `status`, the final `url`
+after redirects, the upstream response `headers`, and the response `body` base64-encoded. An
+upstream non-2xx status SHALL be reported as data in that body, never as the service's own
+status.
+
+#### Scenario: Upstream success
+- **WHEN** a caller fetches a page the upstream serves with 200
+- **THEN** the service answers 200 with `status` 200 and the page bytes in `body`
+
+#### Scenario: Upstream refusal is data
+- **WHEN** the upstream answers 403
+- **THEN** the service answers 200 with `status` 403 and the refusal page in `body`
+
+#### Scenario: Service-side failure
+- **WHEN** the fetch cannot complete (browser crash, timeout, unreachable host)
+- **THEN** the service answers with a 5xx status and an error message, and no upstream status
+
+### Requirement: Fetch modes
+The service SHALL serve `http` mode through Scrapling's TLS-impersonating HTTP fetcher for any
+method, and `browser` mode through a stealth browser session that solves Cloudflare
+challenges. `browser` mode SHALL accept only `GET`.
+
+#### Scenario: Non-GET in browser mode
+- **WHEN** a caller sends `method: POST` with `mode: browser`
+- **THEN** the service answers 400 without starting a browser
+
+### Requirement: Proxy credential stays in the service
+The proxy URL SHALL come from the service's own environment (`SOURCES_PROXY_URL`). A caller
+SHALL only select it with `proxy: true`; the request SHALL NOT carry a proxy address.
+
+#### Scenario: Proxy requested without one configured
+- **WHEN** a caller sends `proxy: true` and the service has no proxy configured
+- **THEN** the service answers 400 rather than fetching directly
+
+### Requirement: Warm browser sessions under a global cap
+The service SHALL reuse one browser session per `(host, proxy)` across requests, closing a
+session after an idle timeout, and SHALL keep no more than `SCRAPLING_MAX_BROWSERS` sessions
+alive, queuing requests that need another.
+
+#### Scenario: Second page on a host reuses the session
+- **WHEN** two `browser` fetches for the same host and proxy arrive in sequence
+- **THEN** the second runs on the session the first opened
+
+#### Scenario: Cap reached
+- **WHEN** a `browser` fetch needs a new session and the cap is reached
+- **THEN** it waits until a session frees or idles out, rather than opening one past the cap
+
+### Requirement: Service access is local and authenticated
+The service SHALL listen on `127.0.0.1` and SHALL refuse a request without the bearer token
+`SCRAPLING_FETCH_TOKEN` with 401. It SHALL bound the request body and the upstream response
+body it returns.
+
+#### Scenario: Missing token
+- **WHEN** a request arrives without the bearer token
+- **THEN** the service answers 401 and fetches nothing
+
+### Requirement: Go transport over the service
+`internal/platform/scraplingfetch` SHALL provide an `http.RoundTripper` that sends each request
+to the service with the provider's configured mode and proxy flag and rebuilds an
+`*http.Response` from the answer, so that an ordinary ingest `Client` built over it keeps its
+retries, body caps and status errors. A service 5xx or an unreachable service SHALL surface as
+a transport error.
+
+#### Scenario: Upstream status passes through
+- **WHEN** the service reports upstream `status` 404
+- **THEN** the round trip returns a response with status 404 and the upstream body
+
+#### Scenario: Service down
+- **WHEN** the service cannot be reached
+- **THEN** the round trip returns an error, and the crawl fails rather than falling back to a
+  direct request
+
+### Requirement: Per-provider allowlist
+`cmd/ingest` SHALL rebuild the providers named in `scraplingProviders` over the Scrapling
+transport at startup, each with its own mode and proxy flag, when `SCRAPLING_FETCH_URL` is set.
+When it is unset, every provider SHALL keep its existing transport. The allowlist SHALL cover
+infojobs, bayt, gulftalent, wantapply (sitemap only), wellfound, hh (detail only), startupjobs,
+cleverstaff, kontur and tbank.
+
+#### Scenario: Unset means unchanged
+- **WHEN** `SCRAPLING_FETCH_URL` is unset
+- **THEN** no provider's transport changes
+
+#### Scenario: Partial routing
+- **WHEN** `SCRAPLING_FETCH_URL` is set
+- **THEN** wantapply reads its sitemap through the service and its posting pages through its
+  existing free client, and hh hydrates details through the service while its listing stays on
+  its existing client
+
+### Requirement: Hosted Firecrawl tier removed
+The repository SHALL NOT contain the hosted Firecrawl client or tier, and SHALL NOT read
+`FIRECRAWL_API_KEY` or `FIRECRAWL_MAX_PAGES_PER_RUN`.
+
+#### Scenario: Old setting is inert
+- **WHEN** `FIRECRAWL_API_KEY` is set in a worker's environment
+- **THEN** nothing reads it and no request goes to the hosted API
