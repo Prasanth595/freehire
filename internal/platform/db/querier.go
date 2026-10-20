@@ -4477,6 +4477,8 @@ type Querier interface {
 	// Predicating on the Pro column alone would leave an Ultra subscriber whose renewal webhook
 	// was lost outside the window forever — they hold no Pro entitlement at all, so there is
 	// nothing there to fall due.
+	// The API product's columns (0184) are here for the same reason: an API subscriber holds no
+	// Pro or Ultra entitlement at all.
 	ListSubscribersNearProExpiryStripe(ctx context.Context, arg ListSubscribersNearProExpiryStripeParams) ([]ListSubscribersNearProExpiryStripeRow, error)
 	// The caller's subscriptions joined to each saved search's display name and query,
 	// newest first — the "My subscriptions" view.
@@ -6009,6 +6011,11 @@ type Querier interface {
 	// what stops a group repeated inside one verbose title from outranking a real
 	// cluster. A second count(DISTINCT id) would only add a per-group sort.
 	ResidualTitleGroups(ctx context.Context, arg ResidualTitleGroupsParams) ([]ResidualTitleGroupsRow, error)
+	// Resolve a presented token to its owner, the key's scope and how far the owner's API
+	// subscription reaches, for the public-read rate limiter. Read-only on purpose: unlike
+	// AuthenticateAPIKey it does NOT touch last_used_at, because it runs on the hottest reads on
+	// the site and its answer is cached. No row means unknown, revoked or expired.
+	ResolveAPIKeyTier(ctx context.Context, tokenHash string) (ResolveAPIKeyTierRow, error)
 	// The canonical slug for each folded key in the batch — one round trip per board run, not
 	// one per posting. pipeline.Runner folds the run's distinct company slugs, asks this once,
 	// and hands the ONE resulting map to both the aggregator-coverage gate and the upsert, so
@@ -6579,6 +6586,9 @@ type Querier interface {
 	// migrations 0135 and 0141 — so clearing a column here says "Stripe confers nothing", never
 	// "this account is not Pro". The account may hold a store subscription or a manual grant,
 	// and before 0135 this write would have revoked either without a trace.
+	//
+	// The API product's two columns (migration 0184) ride the same statement: they come from the
+	// same re-read of the same customer, and two writes would let a reader see one half of it.
 	SetStripeEntitlement(ctx context.Context, arg SetStripeEntitlementParams) error
 	// Pause/resume a subscription, scoped to its owner. No matching owner-scoped row
 	// returns no row (the handler maps that to 404).

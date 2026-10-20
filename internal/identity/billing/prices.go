@@ -25,7 +25,8 @@ type PublicPrice struct {
 	Interval string `json:"interval"`
 	// Default marks the price a new subscriber is sold unless they choose otherwise.
 	Default bool `json:"default"`
-	// Tier is which plan this price buys — "pro" or "ultra". It is derived from which
+	// Tier is which plan this price buys — "pro" or "ultra", or "api"/"api_data" for the
+	// API product (see APITier). It is derived from which
 	// configured list the id appears in, which is the same thing that decides what a
 	// subscription confers, so a page can never offer a price under the wrong heading.
 	//
@@ -129,13 +130,15 @@ func (s *Service) PublicPrices(ctx context.Context) []PublicPrice {
 // All or nothing. A partial list is worse than none, because a page showing one of two
 // plans looks complete — so a single failure discards what was already read.
 func (s *Service) fetchPrices(ctx context.Context) ([]PublicPrice, error) {
-	out := make([]PublicPrice, 0, len(s.cfg.Prices)+len(s.cfg.UltraPrices))
+	out := make([]PublicPrice, 0, len(s.cfg.Prices)+len(s.cfg.UltraPrices)+len(s.cfg.APIPrices)+len(s.cfg.APIDataPrices))
 	for _, list := range []struct {
 		tier string
 		ids  []string
 	}{
 		{tierPro, s.cfg.Prices},
 		{tierUltra, s.cfg.UltraPrices},
+		{string(APITierAPI), s.cfg.APIPrices},
+		{string(APITierData), s.cfg.APIDataPrices},
 	} {
 		for i, id := range list.ids {
 			p, err := s.client.price(ctx, id)
@@ -177,5 +180,6 @@ func (c *client) price(ctx context.Context, id string) (PublicPrice, error) {
 // a session, because the price arrives from the browser and a caller who could name any
 // price could name one costing nothing.
 func (c Config) Sells(priceID string) bool {
-	return slices.Contains(c.Prices, priceID) || slices.Contains(c.UltraPrices, priceID)
+	return slices.Contains(c.Prices, priceID) || slices.Contains(c.UltraPrices, priceID) ||
+		slices.Contains(c.APIPrices, priceID) || slices.Contains(c.APIDataPrices, priceID)
 }
