@@ -635,7 +635,7 @@ func Register(app *fiber.App, cfg Config) {
 	// here rather than passed to a constructor that already takes ten arguments.
 	authH.withInvites(promoSvc)
 	// Public: a pricing page that needs an account cannot do a pricing page's job.
-	plansH := newPlansHandlers(cfg.Plan, billingSvc)
+	plansH := newPlansHandlers(cfg.Plan, billingSvc, cfg.PublicAnonStrict)
 	matchH := newMatchHandlers(queries, profileSvc, resumeStore, matchAnalyzer, plans)
 	// The CV store is shared: the CV surface owns the write path, referrals render from it
 	// and autofill reads the base CV's contact header out of it. AGENTS.md puts shared

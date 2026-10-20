@@ -89,6 +89,12 @@ func agentSearchLimiter(g *publicGate) fiber.Handler {
 	return g.limiter(agentSearchBudget)
 }
 
+// chatAgentLimiter is agentSearchLimiter for the ChatGPT app's MCP surfaces, which keep the
+// agent-search budget for anonymous callers even under strict (see chatAgentBudget).
+func chatAgentLimiter(g *publicGate) fiber.Handler {
+	return g.limiter(chatAgentBudget)
+}
+
 // suggestLimiter throttles the search box's completions on their own budget, so a
 // visitor typing quickly cannot exhaust the allowance the rest of the site reads on.
 func suggestLimiter(throttler ratelimit.Throttler) fiber.Handler {

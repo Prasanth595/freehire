@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
+	"golang.org/x/sync/singleflight"
 
 	"github.com/strelov1/freehire/internal/api/ratelimit"
 	"github.com/strelov1/freehire/internal/identity/auth"
@@ -43,20 +44,36 @@ const verifiedBotHeader = "X-FH-Verified-Bot"
 // a lapsed subscription keeps its rate for at most this long.
 const keyTierTTL = time.Minute
 
-// keyTierCacheMax bounds the cache. Unknown keys are cached too (so a flood of made-up keys
-// costs one lookup each, not one per request), which makes the size attacker-chosen; past the
-// bound the cache simply starts over.
-const keyTierCacheMax = 10_000
+// keyLookupTimeout bounds the one database read the gate may make, like ratelimit's own
+// allowTimeout: a slow database must degrade a keyed request to anonymous, not stall it.
+const keyLookupTimeout = 150 * time.Millisecond
+
+// keyLookupsPerMinute bounds how many UNCACHED key lookups one IP may cause. A made-up key
+// that passes the shape check costs a database read, so without this a flood of distinct
+// fake keys would be a flood of queries on the hottest reads on the site. A real client
+// presents the same key or two, which the cache answers after the first request.
+const keyLookupsPerMinute = 30
+
+// missCacheMax bounds the cache of keys that resolved to nothing. Its size is attacker-chosen,
+// so past the bound it starts over — which costs only more lookups, already bounded above.
+// Real keys live in a separate map whose size is bounded by the keys that exist, so a flood
+// of fake ones can never evict them.
+const missCacheMax = 10_000
 
 // publicBudget is one public-read route class's anonymous budget before the strict switch.
 type publicBudget struct {
 	name      string
 	perMinute int
+	// legacyOnly keeps this budget for anonymous callers even under strict. The ChatGPT
+	// app's MCP surfaces are reached from OpenAI's egress addresses, which every ChatGPT user
+	// shares — a per-IP daily cap there would be a cap on the whole channel, our largest.
+	legacyOnly bool
 }
 
 var (
-	publicReadBudget  = publicBudget{"publicread", publicReadsPerMinute}
-	agentSearchBudget = publicBudget{"agentsearch", agentSearchPerMinute}
+	publicReadBudget  = publicBudget{name: "publicread", perMinute: publicReadsPerMinute}
+	agentSearchBudget = publicBudget{name: "agentsearch", perMinute: agentSearchPerMinute}
+	chatAgentBudget   = publicBudget{name: "agentsearch", perMinute: agentSearchPerMinute, legacyOnly: true}
 )
 
 // apiKeyTiers resolves a presented key to its owner and the owner's API entitlement.
@@ -85,18 +102,20 @@ type publicGate struct {
 	cfg       publicGateConfig
 	now       func() time.Time
 
-	mu    sync.Mutex
-	cache map[string]cachedKeyTier
+	lookups singleflight.Group
+	mu      sync.Mutex
+	hits    map[string]cachedKeyTier
+	misses  map[string]time.Time
 }
 
 type cachedKeyTier struct {
 	row     db.ResolveAPIKeyTierRow
-	known   bool
 	expires time.Time
 }
 
 func newPublicGate(throttler ratelimit.Throttler, keys apiKeyTiers, cfg publicGateConfig) *publicGate {
-	return &publicGate{throttler: throttler, keys: keys, cfg: cfg, now: time.Now, cache: map[string]cachedKeyTier{}}
+	return &publicGate{throttler: throttler, keys: keys, cfg: cfg, now: time.Now,
+		hits: map[string]cachedKeyTier{}, misses: map[string]time.Time{}}
 }
 
 // limiter is the middleware a public read route mounts for its budget class.
@@ -111,9 +130,12 @@ func (g *publicGate) limiter(b publicBudget) fiber.Handler {
 		if ratelimit.TrustedPeer(c) || g.verifiedBot(c) {
 			return c.Next()
 		}
-		if err := g.enforce(c, b); err != nil {
+		userID, tier := g.paidTier(c)
+		if err := g.enforce(c, b, userID, tier); err != nil {
 			var fe *fiber.Error
-			if errors.As(err, &fe) && fe.Code == fiber.StatusTooManyRequests && g.cfg.PricingURL != "" {
+			// The upsell names the paid plans to an ANONYMOUS caller only: a paying one who
+			// ran out already holds a key, and telling them to use one reads as a bug.
+			if errors.As(err, &fe) && fe.Code == fiber.StatusTooManyRequests && tier == billing.APITierNone && g.cfg.PricingURL != "" {
 				return fiber.NewError(fiber.StatusTooManyRequests,
 					"too many requests, please try again later — for higher limits use an API key: "+g.cfg.PricingURL)
 			}
@@ -123,8 +145,8 @@ func (g *publicGate) limiter(b publicBudget) fiber.Handler {
 	}
 }
 
-func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget) error {
-	if userID, tier := g.paidTier(c); tier != billing.APITierNone {
+func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget, userID int64, tier billing.APITier) error {
+	if tier != billing.APITierNone {
 		rate := paidAPIPerMinute
 		if tier == billing.APITierData {
 			rate = paidDataPerMinute
@@ -132,13 +154,16 @@ func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget) error {
 		return ratelimit.Enforce(c, g.throttler, "paid:"+strconv.FormatInt(userID, 10), rate, time.Minute)
 	}
 	ip := c.IP()
-	if !g.cfg.Strict {
+	if !g.cfg.Strict || b.legacyOnly {
 		return ratelimit.Enforce(c, g.throttler, b.name+":"+ip, b.perMinute, time.Minute)
 	}
-	if err := ratelimit.Enforce(c, g.throttler, "anon:"+ip, anonPerMinute, time.Minute); err != nil {
+	// The day first and the minute LAST: each check writes the budget headers, and on an
+	// admitted request the ones left standing must be the minute's, which is the budget a
+	// client actually paces against and the one that will refuse it first.
+	if err := ratelimit.Enforce(c, g.throttler, "anonday:"+ip, anonPerDay, 24*time.Hour); err != nil {
 		return err
 	}
-	return ratelimit.Enforce(c, g.throttler, "anonday:"+ip, anonPerDay, 24*time.Hour)
+	return ratelimit.Enforce(c, g.throttler, "anon:"+ip, anonPerMinute, time.Minute)
 }
 
 func (g *publicGate) verifiedBot(c *fiber.Ctx) bool {
@@ -154,40 +179,77 @@ func (g *publicGate) verifiedBot(c *fiber.Ctx) bool {
 // inside third-party pages by design, and a paid rate on it would be anyone's for the copying.
 func (g *publicGate) paidTier(c *fiber.Ctx) (int64, billing.APITier) {
 	token, ok := auth.PresentedAPIKey(c)
-	if !ok || g.keys == nil {
+	if !ok || g.keys == nil || !auth.WellFormedAPIKey(token) {
 		return 0, billing.APITierNone
 	}
-	row, known := g.resolve(c.Context(), auth.HashAPIKey(token))
+	row, known := g.resolve(c, auth.HashAPIKey(token))
 	if !known || row.Scope != auth.ScopeFull {
 		return 0, billing.APITierNone
 	}
 	return row.UserID, billing.APITierOf(row.ApiUntilStripe.Time, row.ApiDataUntilStripe.Time, g.now())
 }
 
-// resolve looks a key up through the cache. The tier itself is resolved per request from the
+// resolve looks a key up through the caches. The tier itself is resolved per request from the
 // cached timestamps, so a subscription lapsing mid-entry is seen at once; what the cache
 // delays is only a CHANGE to the account. A lookup that errored is not cached — the database
 // being down must not pin a paying key to the anonymous rate for a minute after it recovers.
-func (g *publicGate) resolve(ctx context.Context, hash string) (db.ResolveAPIKeyTierRow, bool) {
+func (g *publicGate) resolve(c *fiber.Ctx, hash string) (db.ResolveAPIKeyTierRow, bool) {
 	now := g.now()
 	g.mu.Lock()
-	entry, hit := g.cache[hash]
+	hit, isHit := g.hits[hash]
+	missAt, isMiss := g.misses[hash]
 	g.mu.Unlock()
-	if hit && now.Before(entry.expires) {
-		return entry.row, entry.known
-	}
-
-	row, err := g.keys.ResolveAPIKeyTier(ctx, hash)
-	known := err == nil
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	switch {
+	case isHit && now.Before(hit.expires):
+		return hit.row, true
+	case isMiss && now.Before(missAt.Add(keyTierTTL)):
 		return db.ResolveAPIKeyTierRow{}, false
 	}
 
-	g.mu.Lock()
-	if len(g.cache) >= keyTierCacheMax {
-		g.cache = map[string]cachedKeyTier{}
+	// An uncached lookup spends the caller's lookup budget. Out of it, the key is simply not
+	// resolved this time: the request is served as anonymous, which is what it would be if
+	// the key were fake, and a real key gets resolved on a later request.
+	if !g.lookupAllowed(c) {
+		return db.ResolveAPIKeyTierRow{}, false
 	}
-	g.cache[hash] = cachedKeyTier{row: row, known: known, expires: now.Add(keyTierTTL)}
-	g.mu.Unlock()
-	return row, known
+
+	// One lookup per key at a time: when a busy paid key's entry expires, its concurrent
+	// requests share one read rather than each issuing their own.
+	v, err, _ := g.lookups.Do(hash, func() (any, error) {
+		ctx, cancel := context.WithTimeout(c.Context(), keyLookupTimeout)
+		defer cancel()
+		return g.keys.ResolveAPIKeyTier(ctx, hash)
+	})
+	switch {
+	case err == nil:
+		row := v.(db.ResolveAPIKeyTierRow)
+		g.mu.Lock()
+		g.hits[hash] = cachedKeyTier{row: row, expires: now.Add(keyTierTTL)}
+		delete(g.misses, hash)
+		g.mu.Unlock()
+		return row, true
+	case errors.Is(err, pgx.ErrNoRows):
+		g.mu.Lock()
+		if len(g.misses) >= missCacheMax {
+			g.misses = map[string]time.Time{}
+		}
+		g.misses[hash] = now
+		delete(g.hits, hash)
+		g.mu.Unlock()
+	}
+	return db.ResolveAPIKeyTierRow{}, false
+}
+
+// lookupAllowed spends one of the caller's uncached-lookup budget. It asks the Throttler
+// directly rather than through ratelimit.Enforce, because this budget is internal: it must
+// not write rate-limit headers or a Retry-After onto a request that is then served. Fail-open
+// like every limiter here.
+func (g *publicGate) lookupAllowed(c *fiber.Ctx) bool {
+	if g.throttler == nil {
+		return true
+	}
+	ctx, cancel := context.WithTimeout(c.Context(), keyLookupTimeout)
+	defer cancel()
+	d, err := g.throttler.Allow(ctx, "keylookup:"+c.IP(), keyLookupsPerMinute, time.Minute)
+	return err != nil || d.Allowed
 }

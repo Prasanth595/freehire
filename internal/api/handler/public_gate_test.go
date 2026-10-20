@@ -1,10 +1,13 @@
 package handler
 
 import (
+	"bytes"
 	"context"
+	"encoding/base64"
 	"errors"
 	"io"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -15,6 +18,7 @@ import (
 
 	"github.com/strelov1/freehire/internal/api/ratelimit"
 	"github.com/strelov1/freehire/internal/identity/auth"
+	"github.com/strelov1/freehire/internal/identity/billing"
 	"github.com/strelov1/freehire/internal/platform/db"
 )
 
@@ -36,16 +40,23 @@ func (r *checkRecorder) Allow(_ context.Context, key string, limit int, window t
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.calls = append(r.calls, check{key, limit, window})
-	if r.refuse {
+	if r.refuse && !strings.HasPrefix(key, "keylookup:") {
 		return ratelimit.Decision{Limit: limit, ResetAfter: window, RetryAfter: window}, nil
 	}
 	return ratelimit.Decision{Allowed: true, Limit: limit, Remaining: limit - 1, ResetAfter: window}, nil
 }
 
+// got is the budget checks made, without the gate's internal key-lookup budget.
 func (r *checkRecorder) got() []check {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return append([]check(nil), r.calls...)
+	var out []check
+	for _, c := range r.calls {
+		if !strings.HasPrefix(c.key, "keylookup:") {
+			out = append(out, c)
+		}
+	}
+	return out
 }
 
 // fakeKeyTiers resolves token hashes to rows and counts lookups.
@@ -72,13 +83,21 @@ func (f *fakeKeyTiers) ResolveAPIKeyTier(_ context.Context, hash string) (db.Res
 
 var gateNow = time.Date(2026, 10, 19, 12, 0, 0, 0, time.UTC)
 
-const (
-	apiKeyToken  = "fhk_api"
-	dataKeyToken = "fhk_data"
-	embedToken   = "fhk_embed"
-	unpaidToken  = "fhk_unpaid"
-	gateIP       = "203.0.113.9"
+// wellFormedKey mints a token with the shape of a real key, distinct per seed.
+func wellFormedKey(seed byte) string {
+	return "fhk_" + base64.RawURLEncoding.EncodeToString(bytes.Repeat([]byte{seed}, 32))
+}
+
+var (
+	apiKeyToken  = wellFormedKey('a')
+	dataKeyToken = wellFormedKey('d')
+	embedToken   = wellFormedKey('e')
+	unpaidToken  = wellFormedKey('u')
+	unknownToken = wellFormedKey('x')
+	lapsedToken  = wellFormedKey('l')
 )
+
+const gateIP = "203.0.113.9"
 
 func paidKeys() *fakeKeyTiers {
 	future := gateNow.Add(24 * time.Hour)
@@ -87,6 +106,7 @@ func paidKeys() *fakeKeyTiers {
 		auth.HashAPIKey(dataKeyToken): {UserID: 8, Scope: auth.ScopeFull, ApiDataUntilStripe: ts(future)},
 		auth.HashAPIKey(embedToken):   {UserID: 7, Scope: auth.ScopeEmbed, ApiUntilStripe: ts(future)},
 		auth.HashAPIKey(unpaidToken):  {UserID: 9, Scope: auth.ScopeFull},
+		auth.HashAPIKey(lapsedToken):  {UserID: 10, Scope: auth.ScopeFull, ApiUntilStripe: ts(gateNow.Add(-time.Hour))},
 	}}
 }
 
@@ -146,8 +166,8 @@ func TestPublicGate_StrictAnonymousIsSharedPerMinuteAndPerDay(t *testing.T) {
 	gateGet(t, app, "/read", nil)
 	gateGet(t, app, "/agent", nil)
 	one := []check{
-		{"anon:" + gateIP, anonPerMinute, time.Minute},
 		{"anonday:" + gateIP, anonPerDay, 24 * time.Hour},
+		{"anon:" + gateIP, anonPerMinute, time.Minute},
 	}
 	if got := rec.got(); !equalChecks(got, append(one, one...)) {
 		t.Fatalf("checks = %+v, want the same two shared keys on both routes", got)
@@ -183,13 +203,13 @@ func TestPublicGate_PaidKeysAreLimitedPerAccountAtTheirTier(t *testing.T) {
 }
 
 func TestPublicGate_KeysWithoutAPaidFullScopeAreAnonymous(t *testing.T) {
-	for _, token := range []string{embedToken, unpaidToken, "fhk_unknown"} {
+	for _, token := range []string{embedToken, unpaidToken, unknownToken, lapsedToken, "fhk_not-a-real-shape"} {
 		t.Run(token, func(t *testing.T) {
 			rec := &checkRecorder{}
 			app := gateApp(newTestGate(rec, paidKeys(), true, ""))
 			gateGet(t, app, "/read", bearer(token))
 			got := rec.got()
-			if len(got) == 0 || got[0].key != "anon:"+gateIP {
+			if len(got) == 0 || got[len(got)-1].key != "anon:"+gateIP {
 				t.Fatalf("checks = %+v, want the anonymous budget", got)
 			}
 		})
@@ -201,8 +221,8 @@ func TestPublicGate_ResolvedTiersAreCachedFailuresAreNot(t *testing.T) {
 	app := gateApp(newTestGate(&checkRecorder{}, keys, true, ""))
 	gateGet(t, app, "/read", bearer(apiKeyToken))
 	gateGet(t, app, "/read", bearer(apiKeyToken))
-	gateGet(t, app, "/read", bearer("fhk_unknown"))
-	gateGet(t, app, "/read", bearer("fhk_unknown"))
+	gateGet(t, app, "/read", bearer(unknownToken))
+	gateGet(t, app, "/read", bearer(unknownToken))
 	if keys.lookups != 2 {
 		t.Fatalf("lookups = %d, want 2 (one per distinct key, negatives cached too)", keys.lookups)
 	}
@@ -217,7 +237,7 @@ func TestPublicGate_ResolvedTiersAreCachedFailuresAreNot(t *testing.T) {
 	if broken.lookups != 2 {
 		t.Fatalf("lookups = %d, want 2 — a failure must not be cached", broken.lookups)
 	}
-	if got := rec.got(); got[0].key != "anon:"+gateIP {
+	if got := rec.got(); got[len(got)-1].key != "anon:"+gateIP {
 		t.Fatalf("checks = %+v, want anonymous", got)
 	}
 }
@@ -295,4 +315,107 @@ func equalChecks(a, b []check) bool {
 		}
 	}
 	return true
+}
+
+func TestAPILimitsViewReadsTheEnforcedBudgets(t *testing.T) {
+	legacy, strict := apiLimitsFor(false), apiLimitsFor(true)
+	if legacy.AnonymousPerMinute != publicReadsPerMinute || legacy.AnonymousPerDay != 0 {
+		t.Errorf("legacy anonymous = %+v", legacy)
+	}
+	if strict.AnonymousPerMinute != anonPerMinute || strict.AnonymousPerDay != anonPerDay {
+		t.Errorf("strict anonymous = %+v", strict)
+	}
+	if strict.APIPerMinute != paidAPIPerMinute || strict.DataPerMinute != paidDataPerMinute {
+		t.Errorf("paid = %+v", strict)
+	}
+}
+
+func TestAPIPlanFrom(t *testing.T) {
+	future := gateNow.Add(time.Hour)
+	if got := apiPlanFrom(time.Time{}, time.Time{}, gateNow); got.Tier != billing.APITierNone || got.PerMinute != 0 || got.Until != nil {
+		t.Errorf("no product = %+v", got)
+	}
+	if got := apiPlanFrom(future, time.Time{}, gateNow); got.Tier != billing.APITierAPI || got.PerMinute != paidAPIPerMinute || !got.Until.Equal(future) {
+		t.Errorf("api = %+v", got)
+	}
+	if got := apiPlanFrom(future, future, gateNow); got.Tier != billing.APITierData || got.PerMinute != paidDataPerMinute {
+		t.Errorf("data = %+v", got)
+	}
+}
+
+func TestPublicGate_AdmittedStrictRequestReportsTheMinuteBudget(t *testing.T) {
+	app := gateApp(newTestGate(&checkRecorder{}, paidKeys(), true, ""))
+	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/read", nil)
+	req.Header.Set(fiber.HeaderXForwardedFor, gateIP)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if got := resp.Header.Get("X-RateLimit-Limit"); got != strconv.Itoa(anonPerMinute) {
+		t.Fatalf("X-RateLimit-Limit = %q, want the minute budget %d", got, anonPerMinute)
+	}
+}
+
+func TestPublicGate_MalformedKeysAndBotsCostNoLookup(t *testing.T) {
+	keys := paidKeys()
+	app := gateApp(newTestGate(&checkRecorder{}, keys, true, "s3cret"))
+	gateGet(t, app, "/read", bearer("fhk_short"))
+	gateGet(t, app, "/read", bearer(wellFormedKey('a')[:46]+"!"))
+	h := bearer(apiKeyToken)
+	h[verifiedBotHeader] = "s3cret"
+	gateGet(t, app, "/read", h)
+	if keys.lookups != 0 {
+		t.Fatalf("lookups = %d, want 0", keys.lookups)
+	}
+}
+
+// lookupRefuser refuses only the internal key-lookup budget.
+type lookupRefuser struct{ checkRecorder }
+
+func (l *lookupRefuser) Allow(ctx context.Context, key string, limit int, window time.Duration) (ratelimit.Decision, error) {
+	if strings.HasPrefix(key, "keylookup:") {
+		return ratelimit.Decision{Limit: limit, RetryAfter: window}, nil
+	}
+	return l.checkRecorder.Allow(ctx, key, limit, window)
+}
+
+func TestPublicGate_LookupBudgetBoundsDatabaseReads(t *testing.T) {
+	keys := paidKeys()
+	app := gateApp(newTestGate(&lookupRefuser{}, keys, true, ""))
+	req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, "/read", nil)
+	req.Header.Set(fiber.HeaderXForwardedFor, gateIP)
+	req.Header.Set("Authorization", "Bearer "+apiKeyToken)
+	resp, err := app.Test(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	if keys.lookups != 0 {
+		t.Fatalf("lookups = %d, want 0 once the lookup budget is spent", keys.lookups)
+	}
+	if resp.StatusCode != fiber.StatusOK || resp.Header.Get("Retry-After") != "" {
+		t.Fatalf("status %d Retry-After %q — an exhausted lookup budget must serve the request as anonymous, silently",
+			resp.StatusCode, resp.Header.Get("Retry-After"))
+	}
+}
+
+func TestPublicGate_PaidRefusalCarriesNoUpsell(t *testing.T) {
+	app := gateApp(newTestGate(&checkRecorder{refuse: true}, paidKeys(), true, ""))
+	code, body := gateGet(t, app, "/read", bearer(apiKeyToken))
+	if code != fiber.StatusTooManyRequests || strings.Contains(body, "pricing") {
+		t.Fatalf("status %d body %q — a paying caller must not be told to buy a key", code, body)
+	}
+}
+
+func TestPublicGate_ChatAgentBudgetStaysLegacyUnderStrict(t *testing.T) {
+	rec := &checkRecorder{}
+	g := newTestGate(rec, paidKeys(), true, "")
+	app := fiber.New(fiber.Config{ProxyHeader: fiber.HeaderXForwardedFor})
+	app.Get("/mcp", chatAgentLimiter(g), func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	gateGet(t, app, "/mcp", nil)
+	want := []check{{"agentsearch:" + gateIP, agentSearchPerMinute, time.Minute}}
+	if got := rec.got(); !equalChecks(got, want) {
+		t.Fatalf("checks = %+v, want %+v — OpenAI's shared egress must not meet a per-IP daily cap", got, want)
+	}
 }

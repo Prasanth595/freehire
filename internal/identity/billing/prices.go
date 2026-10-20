@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"log"
 	"net/http"
 	"net/url"
 	"slices"
@@ -127,19 +128,32 @@ func (s *Service) PublicPrices(ctx context.Context) []PublicPrice {
 
 // fetchPrices reads every configured price from the provider.
 //
-// All or nothing. A partial list is worse than none, because a page showing one of two
-// plans looks complete — so a single failure discards what was already read.
+// All or nothing PER PRODUCT. A partial list is worse than none, because a page showing one
+// of two plans looks complete — so a single failure discards what was already read of that
+// product. The API product is read apart: it is a different thing to buy, and a mistyped API
+// price id must not take the Pro and Ultra prices off the page with it.
 func (s *Service) fetchPrices(ctx context.Context) ([]PublicPrice, error) {
-	out := make([]PublicPrice, 0, len(s.cfg.Prices)+len(s.cfg.UltraPrices)+len(s.cfg.APIPrices)+len(s.cfg.APIDataPrices))
-	for _, list := range []struct {
-		tier string
-		ids  []string
-	}{
-		{tierPro, s.cfg.Prices},
-		{tierUltra, s.cfg.UltraPrices},
-		{string(APITierAPI), s.cfg.APIPrices},
-		{string(APITierData), s.cfg.APIDataPrices},
-	} {
+	out, err := s.readTiers(ctx, []priceTier{{tierPro, s.cfg.Prices}, {tierUltra, s.cfg.UltraPrices}})
+	if err != nil {
+		return nil, err
+	}
+	api, err := s.readTiers(ctx, []priceTier{{string(APITierAPI), s.cfg.APIPrices}, {string(APITierData), s.cfg.APIDataPrices}})
+	if err != nil {
+		log.Printf("billing: reading the API product's prices: %v (omitting them)", err)
+		return out, nil
+	}
+	return append(out, api...), nil
+}
+
+type priceTier struct {
+	tier string
+	ids  []string
+}
+
+// readTiers reads one product's prices, failing as a whole on the first failure.
+func (s *Service) readTiers(ctx context.Context, tiers []priceTier) ([]PublicPrice, error) {
+	var out []PublicPrice
+	for _, list := range tiers {
 		for i, id := range list.ids {
 			p, err := s.client.price(ctx, id)
 			if err != nil {

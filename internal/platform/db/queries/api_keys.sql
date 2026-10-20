@@ -50,6 +50,12 @@ JOIN users u ON u.id = k.user_id
 WHERE k.token_hash = $1
   AND (k.expires_at IS NULL OR k.expires_at > now());
 
+-- name: GetUserAPIEntitlement :one
+-- How far the account's API product subscriptions reach, for its own key-management page.
+SELECT api_until_stripe, api_data_until_stripe
+FROM users
+WHERE id = $1;
+
 -- name: DeleteAPIKey :execrows
 -- Revoke (delete) a key, scoped to its owner so a user can only delete their own.
 -- Returns the affected row count: 0 means the key does not exist or is not the

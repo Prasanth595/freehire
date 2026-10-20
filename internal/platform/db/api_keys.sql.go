@@ -120,6 +120,25 @@ func (q *Queries) DeleteAPIKey(ctx context.Context, arg DeleteAPIKeyParams) (int
 	return result.RowsAffected(), nil
 }
 
+const getUserAPIEntitlement = `-- name: GetUserAPIEntitlement :one
+SELECT api_until_stripe, api_data_until_stripe
+FROM users
+WHERE id = $1
+`
+
+type GetUserAPIEntitlementRow struct {
+	ApiUntilStripe     pgtype.Timestamptz `json:"api_until_stripe"`
+	ApiDataUntilStripe pgtype.Timestamptz `json:"api_data_until_stripe"`
+}
+
+// How far the account's API product subscriptions reach, for its own key-management page.
+func (q *Queries) GetUserAPIEntitlement(ctx context.Context, id int64) (GetUserAPIEntitlementRow, error) {
+	row := q.db.QueryRow(ctx, getUserAPIEntitlement, id)
+	var i GetUserAPIEntitlementRow
+	err := row.Scan(&i.ApiUntilStripe, &i.ApiDataUntilStripe)
+	return i, err
+}
+
 const listAPIKeysByUser = `-- name: ListAPIKeysByUser :many
 SELECT id, name, token_prefix, scope, created_at, last_used_at, expires_at
 FROM api_keys

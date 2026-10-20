@@ -2748,6 +2748,8 @@ type Querier interface {
 	// Lock today's counter for the consumption transaction. EnsureUsageDay guarantees the row
 	// exists, so this never returns no-rows on that path.
 	GetUsageDayForUpdate(ctx context.Context, arg GetUsageDayForUpdateParams) (int64, error)
+	// How far the account's API product subscriptions reach, for its own key-management page.
+	GetUserAPIEntitlement(ctx context.Context, id int64) (GetUserAPIEntitlementRow, error)
 	// The user's cached CV ATS qualitative review (content-quality + findings), or NULL
 	// when none has been computed. Derived only — never the raw CV text.
 	GetUserATSAnalysis(ctx context.Context, id int64) ([]byte, error)

@@ -150,3 +150,20 @@ func TestAPITierOf(t *testing.T) {
 		})
 	}
 }
+
+func TestPublicPricesSurviveABrokenAPIPrice(t *testing.T) {
+	s, _ := pricedService(t, func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/price_typo") {
+			http.Error(w, `{"error":{"message":"No such price"}}`, http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(monthlyPriceBody))
+	})
+	s.cfg.APIPrices = []string{"price_typo"}
+
+	got := s.PublicPrices(context.Background())
+	if len(got) != 1 || got[0].Tier != "pro" {
+		t.Fatalf("prices = %+v, want Pro still listed and the broken API product omitted", got)
+	}
+}
