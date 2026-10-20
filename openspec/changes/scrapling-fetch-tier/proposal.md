@@ -1,11 +1,12 @@
 ## Why
 
-Ten sources cannot be crawled today. The hosted Firecrawl tier is out of credits (`api status
+Nine sources cannot be crawled today. The hosted Firecrawl tier is out of credits (`api status
 402` on wantapply since 2026-10-18) and bayt / gulftalent have had no successful crawl since
 2026-09-07; InfoJobs refuses the crawler host's IP and challenges the proxy after five pages;
 the rest answer 403, time out, or fail TLS on our plain Go client. A spike on host2
 (2026-10-20, `docs/superpowers/specs/2026-10-20-scrapling-fetch-design.md`) showed a
-self-hosted Scrapling service fetches every one of them, at no per-page cost.
+self-hosted Scrapling service fetches every one of them, at no per-page cost. (tbank, also failing, is a
+TLS trust-store problem rather than an anti-bot one, and is out of scope.)
 
 ## What Changes
 
@@ -18,7 +19,7 @@ self-hosted Scrapling service fetches every one of them, at no per-page cost.
   runs over it unchanged.
 - New `scraplingProviders` allowlist, applied at `cmd/ingest` startup, naming each provider's
   mode and proxy: infojobs, bayt, gulftalent, wantapply (sitemap), wellfound, hh (detail),
-  startupjobs, cleverstaff, kontur, tbank. A no-op without `SCRAPLING_FETCH_URL`.
+  startupjobs, cleverstaff, kontur. A no-op without `SCRAPLING_FETCH_URL`.
 - InfoJobs listing spread across parallel browser sessions; its detail pages re-tested through
   the service, and hydration restored if they pass.
 - **BREAKING (operator):** the hosted Firecrawl tier is removed — `internal/platform/firecrawl`,

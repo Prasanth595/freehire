@@ -38,17 +38,20 @@ SHALL only select it with `proxy: true`; the request SHALL NOT carry a proxy add
 - **THEN** the service answers 400 rather than fetching directly
 
 ### Requirement: Warm browser sessions under a global cap
-The service SHALL reuse one browser session per `(host, proxy)` across requests, closing a
-session after an idle timeout, and SHALL keep no more than `SCRAPLING_MAX_BROWSERS` sessions
-alive, queuing requests that need another.
+The service SHALL reuse warm browser sessions keyed by `(host, proxy)` across requests, opening
+another for the same key only when its existing ones are busy, closing a session after an idle
+timeout, and SHALL keep no more than `SCRAPLING_MAX_BROWSERS` sessions alive — closing an idle
+session of another key to make room, and otherwise queuing a request for at most a bounded time
+before failing it.
 
 #### Scenario: Second page on a host reuses the session
 - **WHEN** two `browser` fetches for the same host and proxy arrive in sequence
 - **THEN** the second runs on the session the first opened
 
 #### Scenario: Cap reached
-- **WHEN** a `browser` fetch needs a new session and the cap is reached
-- **THEN** it waits until a session frees or idles out, rather than opening one past the cap
+- **WHEN** a `browser` fetch needs a new session, the cap is reached and every session is busy
+- **THEN** it waits until one frees, never opening one past the cap, and fails with a 5xx if
+  none frees within the queue bound
 
 ### Requirement: Service access is local and authenticated
 The service SHALL listen on `127.0.0.1` and SHALL refuse a request without the bearer token
@@ -59,12 +62,22 @@ body it returns.
 - **WHEN** a request arrives without the bearer token
 - **THEN** the service answers 401 and fetches nothing
 
+### Requirement: Internal targets refused
+The service SHALL refuse with 400, before fetching, a URL whose host resolves to any loopback,
+private, link-local, multicast, reserved or unspecified address, because adapters follow links
+scraped from the sources' own pages and the fetch runs on the crawl host.
+
+#### Scenario: Metadata endpoint
+- **WHEN** a request names `http://169.254.169.254/...` or a host resolving to `10.0.0.5`
+- **THEN** the service answers 400 and fetches nothing
+
 ### Requirement: Go transport over the service
 `internal/platform/scraplingfetch` SHALL provide an `http.RoundTripper` that sends each request
 to the service with the provider's configured mode and proxy flag and rebuilds an
 `*http.Response` from the answer, so that an ordinary ingest `Client` built over it keeps its
-retries, body caps and status errors. A service 5xx or an unreachable service SHALL surface as
-a transport error.
+body caps and status errors. A service 5xx or an unreachable service SHALL surface as a
+transport error. The client built over it SHALL NOT retry on its own (the service retries once),
+so one dead page cannot cost several browser timeouts.
 
 #### Scenario: Upstream status passes through
 - **WHEN** the service reports upstream `status` 404
@@ -79,8 +92,8 @@ a transport error.
 `cmd/ingest` SHALL rebuild the providers named in `scraplingProviders` over the Scrapling
 transport at startup, each with its own mode and proxy flag, when `SCRAPLING_FETCH_URL` is set.
 When it is unset, every provider SHALL keep its existing transport. The allowlist SHALL cover
-infojobs, bayt, gulftalent, wantapply (sitemap only), wellfound, hh (detail only), startupjobs,
-cleverstaff, kontur and tbank.
+infojobs, bayt, gulftalent, wantapply (sitemap only), wellfound, hh (detail only), startupjobs
+(its Cloudflare-challenged pages only), cleverstaff and kontur.
 
 #### Scenario: Unset means unchanged
 - **WHEN** `SCRAPLING_FETCH_URL` is unset

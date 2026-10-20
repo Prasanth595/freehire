@@ -82,14 +82,13 @@ today's transport — that is also the rollback.
 |---|---|---|---|
 | infojobs | browser | yes | whole crawl |
 | bayt | browser | no | whole crawl |
-| gulftalent | http | yes | whole crawl |
+| gulftalent | browser | no | whole crawl — its sitemap answered a Cloudflare challenge to `http` + proxy on 2026-10-20 |
 | wantapply | browser | no | sitemap only; pages stay on the free `.cy` client, as today |
 | wellfound | http | yes | whole crawl |
 | hh | http | no | detail hydration only, as today with Firecrawl |
 | startupjobs | browser | no | whole crawl |
 | cleverstaff | http | no | whole crawl |
 | kontur | http | yes | whole crawl |
-| tbank | browser | no | whole crawl |
 
 Each row's mode is the cheapest one the spike saw pass; the plan re-verifies each one live
 before its row lands.
@@ -131,4 +130,7 @@ a systemd unit that lives in `freehire-ops` (`provision/host2/`), not in this re
 ## Out of scope
 
 echojobs (Vercel checkpoint), neogov, dodo, energyjobline (its sitemap moved — an adapter fix),
-jobleads (its POST search answers 503), wuzzuf / workatastartup / naukri (not measured).
+jobleads (its POST search answers 503), wuzzuf / workatastartup / naukri (not measured), and
+tbank: its API is a POST, which browser mode cannot send, and the `http` fetcher refuses its
+certificate chain ("self signed certificate in certificate chain") — a trust-store question,
+not an anti-bot one.

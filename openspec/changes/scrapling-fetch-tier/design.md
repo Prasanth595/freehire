@@ -40,8 +40,8 @@ reaches into Scrapling's session API, and a floating `latest` would change it wi
 
 **Go side is an `http.RoundTripper`, not a new getter type.** `sources.Client` wraps an
 `*http.Client`; giving it a transport that forwards to the service keeps retries, the 64 MiB
-body cap, `StatusError`, `BodyTooLargeError` and every getter (including POST, which cleverstaff
-and tbank need) as the existing code. The Firecrawl client re-implemented `GetXML`/`GetHTML`
+body cap, `StatusError`, `BodyTooLargeError` and every getter, POST paths included, as the
+existing code. The Firecrawl client re-implemented `GetXML`/`GetHTML`
 and could do nothing else. Alternative rejected: a second getter implementation per interface.
 
 **Package in `platform`** (`internal/platform/scraplingfetch`), beside `safehttp`: transport,
@@ -53,8 +53,19 @@ by the service. No credential in request bodies or logs.
 **Sessions keyed by `(host, proxy)`.** A Cloudflare clearance is per host and per exit IP;
 keying that way solves a challenge once per crawl. Idle TTL closes a session; a global cap
 (`SCRAPLING_MAX_BROWSERS`, default 3, ~1.7 GB each) bounds memory. A parallel crawl of one host
-(InfoJobs) holds several sessions for that host: the key carries a slot index chosen by the
-service when the host's existing sessions are busy, still under the global cap.
+(InfoJobs) holds several sessions for that host: a request whose key's sessions are all busy
+opens another, still under the global cap. A request queues for a session at most 120 s, below
+the Go client's timeout, so one its caller abandoned does not later spend a browser.
+
+**No client-side retries over the tier.** The service retries once; `sources.Client`'s own two
+retries on top would turn one dead browser page into ~15 minutes.
+
+**Internal targets refused in the service.** The plain client's `safehttp` guard does not see a
+request the service makes, and bayt/gulftalent follow links scraped from the sources' pages, so
+the service resolves the host and refuses loopback, private and link-local addresses itself.
+
+**InfoJobs fetches its listing pages concurrently** (3 at once, the default browser cap): its
+first page states the total, which fixes the page count; any failed page still fails the crawl.
 
 **Modes per provider are the cheapest the spike saw pass**, re-verified live before each row
 lands: `http` is ~0.2-2 s, `browser` ~6-9 s after the first page.
@@ -67,10 +78,10 @@ it. The token is defence in depth against other tenants of host2.
 - [A source tightens its defence again] → the crawl fails loudly through board health, as
   today; the per-provider mode is one line to change.
 - [Browser memory on a shared host] → global cap and idle TTL; container memory limit.
-- [InfoJobs at ~7.5 s/page is ~6 h on one session] → pages spread across sessions; cadence
-  daily with a timeout sized to the measured run. If still too slow, its timeout grows rather
+- [InfoJobs at ~7.5 s/page is ~6 h on one session] → 3 pages in flight (~2 h); cadence daily
+  with a timeout sized to the measured run. If still too slow, its timeout grows rather
   than the crawl going partial (partial crawls already fail, #3336).
-- [Service down stops ten providers at once] → systemd restarts it; board health shows it the
+- [Service down stops nine providers at once] → systemd restarts it; board health shows it the
   same day. No silent fallback to the direct client, which would only be refused.
 - [Scrapling is a single-maintainer project] → pinned digest; the Go side depends only on our
   own `/fetch` contract, so the engine behind it can be swapped.
