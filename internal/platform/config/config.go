@@ -88,10 +88,11 @@ type Settings struct {
 	MailboxDomain string
 
 	// TypesafeAPIKey backs the Jev provider for every discrete-choice LLM call that opts
-	// in: the autofill agent's Choose call (internal/ai/autofillagent.JevPlanner) and
-	// select-kind auto-apply drafting (internal/api/atsapply.JevSelectDrafter). Empty
-	// disables it outright for both: each falls back to its own LLM path exactly as it
-	// did before this setting existed. Unrelated to LLM_* — it is read fresh here.
+	// in: the autofill agent's Choose call (internal/ai/autofillagent.JevPlanner),
+	// select-kind auto-apply drafting (internal/api/atsapply.JevSelectDrafter), and
+	// inbox mail classification (internal/application/mailclassify). Empty disables it
+	// outright: each falls back to its own LLM path exactly as it did before this
+	// setting existed. Unrelated to LLM_* — it is read fresh here.
 	TypesafeAPIKey string
 
 	// Meilisearch backs the job search endpoint and the reindex command. Shared

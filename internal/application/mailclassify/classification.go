@@ -63,6 +63,10 @@ type Classification struct {
 	Signal       StatusSignal `json:"signal"`
 	Confidence   float64      `json:"confidence"`
 	MatchedJobID int64        `json:"matched_job_id"`
+	// Model names the classifier that answered, when it is not the caller's default
+	// LLM — persisted as emails.classification_model so Jev's answers stay separable.
+	// Never decoded from a model's JSON: an email cannot choose its own attribution.
+	Model string `json:"-"`
 }
 
 // Sanitize coerces the classification into the controlled vocabulary before it
