@@ -50,7 +50,7 @@ export interface CoveredCategory {
 export function coveredCategories(roles: InsightRole[]): CoveredCategory[] {
   const totals = new Map<string, number>();
   for (const r of roles) {
-    if (r.category === 'other' || !(r.category in CATEGORY_LABELS)) continue;
+    if (r.category === 'other' || !Object.prototype.hasOwnProperty.call(CATEGORY_LABELS, r.category)) continue;
     totals.set(r.category, (totals.get(r.category) ?? 0) + r.open_count);
   }
   return [...totals.entries()]

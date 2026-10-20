@@ -49,6 +49,11 @@ describe('coveredCategories', () => {
     expect(isCovered(roles, 'management')).toBe(false);
   });
 
+  it('does not mistake an inherited object key for a category', () => {
+    const roles = [role('toString', 'senior', 1000), role('constructor', 'senior', 1000)];
+    expect(coveredCategories(roles)).toHaveLength(0);
+  });
+
   it('sorts by demand descending', () => {
     const roles = [
       role('frontend', 'senior', 100),
