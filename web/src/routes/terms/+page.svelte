@@ -81,6 +81,22 @@
       </p>
     </section>
 
+    <section id="data-licence" class="flex scroll-mt-20 flex-col gap-3">
+      <h2 class="text-xl font-semibold tracking-tight">Data licence for API plans</h2>
+      <p class="text-sm leading-relaxed text-muted-foreground">
+        While your account holds an
+        <!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() is applied; the rule cannot see through the appended section anchor -->
+        <a href={resolve('/pricing') + '#api'} class="font-medium text-foreground underline-offset-4 hover:underline"
+          >API plan</a
+        >, you may store the data you read through our API and show it in your own product,
+        including a commercial one. You may not resell or redistribute the raw data as a dataset
+        or feed of its own. Every posting you show must link to its page on freehire.me or carry
+        the credit "via freehire.me". Without a plan, the API is for personal and non-commercial
+        use. The postings themselves still belong to the employers who published them, and these
+        terms do not grant rights an employer or original source has not given us.
+      </p>
+    </section>
+
     <section class="flex flex-col gap-3">
       <h2 class="text-xl font-semibold tracking-tight">AI features</h2>
       <p class="text-sm leading-relaxed text-muted-foreground">
