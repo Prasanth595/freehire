@@ -357,6 +357,8 @@ func main() {
 		Throttler:                   throttler,
 		Cache:                       cache.NewRedisCache(redisClient),
 		FrontendOrigin:              cfg.FrontendOrigin,
+		PublicAnonStrict:            cfg.PublicAnonLimits == "strict",
+		VerifiedBotSecret:           cfg.VerifiedBotSecret,
 		JWTSecret:                   cfg.JWTSecret,
 		JWTTTL:                      cfg.JWTTTL,
 		CookieSecure:                cfg.CookieSecure,

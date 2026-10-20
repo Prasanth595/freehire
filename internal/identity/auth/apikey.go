@@ -5,6 +5,9 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"strings"
+
+	"github.com/gofiber/fiber/v2"
 )
 
 // apiKeyPrefix marks every freehire API key so a leaked secret is recognizable (to
@@ -42,4 +45,13 @@ func GenerateAPIKey() (token, hash, prefix string, err error) {
 func HashAPIKey(token string) string {
 	sum := sha256.Sum256([]byte(token))
 	return hex.EncodeToString(sum[:])
+}
+
+// PresentedAPIKey returns the freehire API key a request carries as its Bearer credential, and
+// whether it carries one at all. A Bearer session JWT (the extension's transport) is not a key.
+// It authenticates nothing: it only names the token, for a caller that resolves it on its own
+// terms — the public-read rate limiter, which must not pay a lookup for a request with none.
+func PresentedAPIKey(c *fiber.Ctx) (string, bool) {
+	token := bearerToken(c)
+	return token, strings.HasPrefix(token, apiKeyPrefix)
 }

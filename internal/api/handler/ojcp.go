@@ -92,7 +92,7 @@ func (h *ojcpHandlers) register(api fiber.Router, mw middleware) {
 	// Public and unauthenticated, like the other job reads. The rate limit is the same
 	// agent-search one: these calls cost what /agent/jobs/search costs, and the manifest
 	// declares that figure — a limit declared and not enforced breaks a MUST in the spec.
-	limit := ojcpRateLimited(agentSearchLimiter(mw.throttler))
+	limit := ojcpRateLimited(agentSearchLimiter(mw.public))
 	api.Post("/ojcp/v1/search", limit, h.OJCPSearchJobs)
 	api.Get("/ojcp/v1/jobs/:slug", limit, h.OJCPJobDetail)
 	api.Get("/ojcp/v1/employers/:slug", limit, h.OJCPEmployerContext)

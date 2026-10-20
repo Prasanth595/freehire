@@ -88,8 +88,8 @@ func TestPublicReadLimiter_BudgetsBySourceAddressEvenForASignedInCaller(t *testi
 	}
 	ok := func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) }
 	// Gate before limiter, so the limiter sees a real authenticated caller.
-	app.Get("/one", signIn(101), publicReadLimiter(th), ok)
-	app.Get("/two", signIn(202), publicReadLimiter(th), ok)
+	app.Get("/one", signIn(101), publicReadLimiter(newPublicGate(th, nil, publicGateConfig{})), ok)
+	app.Get("/two", signIn(202), publicReadLimiter(newPublicGate(th, nil, publicGateConfig{})), ok)
 
 	get := func(path string) int {
 		req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, path, nil)
@@ -118,8 +118,8 @@ func TestPublicReadLimiters_DoNotShareABudget(t *testing.T) {
 	th := newOneShotThrottler()
 
 	app := fiber.New(fiber.Config{ProxyHeader: fiber.HeaderXForwardedFor})
-	app.Get("/cheap", publicReadLimiter(th), func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
-	app.Get("/agent", agentSearchLimiter(th), func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	app.Get("/cheap", publicReadLimiter(newPublicGate(th, nil, publicGateConfig{})), func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	app.Get("/agent", agentSearchLimiter(newPublicGate(th, nil, publicGateConfig{})), func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
 
 	get := func(path string) int {
 		req := httptest.NewRequestWithContext(context.Background(), fiber.MethodGet, path, nil)
@@ -197,6 +197,7 @@ func publicReadRoutes(t *testing.T, throttler ratelimit.Throttler) (map[string]*
 		key:       passthrough,
 		moderator: passthrough,
 		throttler: throttler,
+		public:    newPublicGate(throttler, nil, publicGateConfig{}),
 	}
 
 	mount := func(register func(fiber.Router, middleware)) *fiber.App {
