@@ -132,7 +132,8 @@ instead of the model retelling it as prose. The tools' contracts are untouched; 
 that ignores `_meta.ui` sees exactly what it saw before.
 
 - **It is hand-written HTML, not a `web/` build, on purpose** — see
-  `openspec/changes/chatgpt-app-widgets/design.md`. If it ever grows forms, sign-in or its
+  `openspec/changes/archive/2026-10-20-chatgpt-app-widgets/design.md`. If it ever grows
+  forms, sign-in or its
   own requests, that is the point to move it.
 - **The URI is the page's hash.** Hosts cache by URI; editing the file changes it. Never
   hard-code the URI anywhere else.
