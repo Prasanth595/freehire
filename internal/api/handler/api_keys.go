@@ -212,12 +212,13 @@ func (h *authHandlers) GetAPIPlan(c *fiber.Ctx) error {
 }
 
 func apiPlanFrom(apiUntil, dataUntil, now time.Time) apiPlanResponse {
-	out := apiPlanResponse{Tier: billing.APITierOf(apiUntil, dataUntil, now)}
-	switch out.Tier {
+	tier := billing.APITierOf(apiUntil, dataUntil, now)
+	out := apiPlanResponse{Tier: tier, PerMinute: paidPerMinute(tier)}
+	switch tier {
 	case billing.APITierData:
-		out.PerMinute, out.Until = paidDataPerMinute, &dataUntil
+		out.Until = &dataUntil
 	case billing.APITierAPI:
-		out.PerMinute, out.Until = paidAPIPerMinute, &apiUntil
+		out.Until = &apiUntil
 	}
 	return out
 }

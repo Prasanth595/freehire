@@ -132,10 +132,9 @@ func (g *publicGate) limiter(b publicBudget) fiber.Handler {
 		}
 		userID, tier := g.paidTier(c)
 		if err := g.enforce(c, b, userID, tier); err != nil {
-			var fe *fiber.Error
 			// The upsell names the paid plans to an ANONYMOUS caller only: a paying one who
 			// ran out already holds a key, and telling them to use one reads as a bug.
-			if errors.As(err, &fe) && fe.Code == fiber.StatusTooManyRequests && tier == billing.APITierNone && g.cfg.PricingURL != "" {
+			if tier == billing.APITierNone && isTooManyRequests(err) && g.cfg.PricingURL != "" {
 				return fiber.NewError(fiber.StatusTooManyRequests,
 					"too many requests, please try again later — for higher limits use an API key: "+g.cfg.PricingURL)
 			}
@@ -147,11 +146,7 @@ func (g *publicGate) limiter(b publicBudget) fiber.Handler {
 
 func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget, userID int64, tier billing.APITier) error {
 	if tier != billing.APITierNone {
-		rate := paidAPIPerMinute
-		if tier == billing.APITierData {
-			rate = paidDataPerMinute
-		}
-		return ratelimit.Enforce(c, g.throttler, "paid:"+strconv.FormatInt(userID, 10), rate, time.Minute)
+		return ratelimit.Enforce(c, g.throttler, "paid:"+strconv.FormatInt(userID, 10), paidPerMinute(tier), time.Minute)
 	}
 	ip := c.IP()
 	if !g.cfg.Strict || b.legacyOnly {
@@ -164,6 +159,23 @@ func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget, userID int64, tier bi
 		return err
 	}
 	return ratelimit.Enforce(c, g.throttler, "anon:"+ip, anonPerMinute, time.Minute)
+}
+
+// paidPerMinute is the public-read rate an API tier buys; zero for no tier.
+func paidPerMinute(tier billing.APITier) int {
+	switch tier {
+	case billing.APITierData:
+		return paidDataPerMinute
+	case billing.APITierAPI:
+		return paidAPIPerMinute
+	default:
+		return 0
+	}
+}
+
+func isTooManyRequests(err error) bool {
+	var fe *fiber.Error
+	return errors.As(err, &fe) && fe.Code == fiber.StatusTooManyRequests
 }
 
 func (g *publicGate) verifiedBot(c *fiber.Ctx) bool {
