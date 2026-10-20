@@ -127,7 +127,9 @@ export const OVERVIEW: Overview[] = [
   {
     title: 'Rate limits and API plans',
     paragraphs: [
-      'The public read endpoints answer without a key, limited per address. `GET ' +
+      'The public read endpoints answer without a key, limited per address — for ' +
+        'personal and non-commercial use. Showing the postings in a product you offer ' +
+        'to others needs an API plan. `GET ' +
         '/plans` reports the figures in force as `api_limits`; every response carries ' +
         '`X-RateLimit-Limit`, `X-RateLimit-Remaining` and `X-RateLimit-Reset`, and a ' +
         'refusal is `429` with `Retry-After`.',

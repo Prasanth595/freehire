@@ -10,7 +10,7 @@
   const canonical = $derived(`${page.url.origin}/terms`);
 
   // Static effective date — bump whenever the terms change.
-  const lastUpdated = 'October 16, 2026';
+  const lastUpdated = 'October 19, 2026';
 </script>
 
 <Seo
@@ -66,8 +66,8 @@
     <section class="flex flex-col gap-3">
       <h2 class="text-xl font-semibold tracking-tight">Acceptable use</h2>
       <p class="text-sm leading-relaxed text-muted-foreground">
-        Don't misuse the service: no scraping beyond our documented API, no attempting to bypass
-        rate limits or authentication, no uploading unlawful content, and no using the service to
+        Don't misuse the service: no scraping beyond our documented API (and within it, the data
+        licence below), no attempting to bypass rate limits or authentication, no uploading unlawful content, and no using the service to
         harass or defraud anyone. We may suspend or terminate accounts that violate this.
       </p>
     </section>
@@ -89,11 +89,18 @@
         <a href={resolve('/pricing') + '#api'} class="font-medium text-foreground underline-offset-4 hover:underline"
           >API plan</a
         >, you may store the data you read through our API and show it in your own product,
-        including a commercial one. You may not resell or redistribute the raw data as a dataset
-        or feed of its own. Every posting you show must link to its page on freehire.me or carry
-        the credit "via freehire.me". Without a plan, the API is for personal and non-commercial
-        use. The postings themselves still belong to the employers who published them, and these
-        terms do not grant rights an employer or original source has not given us.
+        including a commercial one. You may not resell or redistribute the raw data — as a
+        download, a dataset, or an API or feed whose purpose is to hand the postings on to other
+        services. Every posting you show must link to its page on freehire.me or carry the credit
+        "via freehire.me". When the plan ends, so does this permission: stop showing the postings
+        and delete what you stored within 30 days.
+      </p>
+      <p class="text-sm leading-relaxed text-muted-foreground">
+        Without a plan, the API is for personal and non-commercial use — your own job search,
+        research, or a tool you run for yourself. Showing our postings in a product or service
+        you offer to others, paid or not, needs a plan. The postings themselves still belong to
+        the employers who published them, and these terms do not grant rights an employer or
+        original source has not given us.
       </p>
     </section>
 

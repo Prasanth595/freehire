@@ -9,7 +9,9 @@
   // The API product: access to the public read API for software, sold apart from the plans
   // above. Its figures come from the same response as theirs, so the page cannot quote a
   // limit the rate limiter does not enforce.
-  const { prices, limits }: { prices: PublicPrice[]; limits: PlansMatrix['api_limits'] } =
+  // `limits` is optional: a backend that predates the API product sends none, and the section
+  // then stays out of the page rather than taking the plans above it down.
+  const { prices, limits }: { prices: PublicPrice[]; limits?: PlansMatrix['api_limits'] } =
     $props();
 
   // One card per tier, and only for a tier that is actually sold: the monthly price when there
@@ -24,24 +26,26 @@
   const count = (n: number) => n.toLocaleString('en-US');
   const money = (p: PublicPrice) => formatMinorUnits(p.amount_cents, p.currency);
 
-  let busy = $state(false);
+  // Which plan's checkout is opening, so only its own button says so.
+  let busyId = $state<string | null>(null);
   let error = $state<string | null>(null);
 
   async function buy(p: PublicPrice) {
-    if (busy) return;
-    busy = true;
+    if (busyId) return;
+    busyId = p.id;
     error = null;
     try {
       const { url } = await api.billingCheckout(p.id);
       window.location.href = url;
     } catch {
       error = 'Checkout is not available right now. Please try again in a moment.';
-      busy = false;
+      busyId = null;
     }
   }
 
-  const cards = $derived(
-    [
+  const cards = $derived.by(() => {
+    if (!limits) return [];
+    return [
       apiPrice && {
         price: apiPrice,
         name: 'API',
@@ -49,7 +53,7 @@
         perks: [
           `${count(limits.api_per_minute)} requests a minute, no daily cap`,
           'Every search filter, every field, company data',
-          'Licence to store and show the postings in your product',
+          'Store and show the postings in your product, under the data licence',
         ],
       },
       dataPrice && {
@@ -62,11 +66,11 @@
           'Bulk catalogue files — coming soon',
         ],
       },
-    ].filter((c) => !!c),
-  );
+    ].filter((c) => !!c);
+  });
 </script>
 
-{#if cards.length > 0}
+{#if limits && cards.length > 0}
   <section id="api" class="flex scroll-mt-20 flex-col gap-6">
     <header class="flex flex-col items-center gap-2 text-center">
       <h2 class="text-2xl font-semibold tracking-tight">API</h2>
@@ -100,10 +104,10 @@
             <button
               type="button"
               class="mt-auto rounded-md border border-primary px-4 py-2.5 text-sm font-medium disabled:opacity-60"
-              disabled={busy}
+              disabled={busyId !== null}
               onclick={() => buy(card.price)}
             >
-              {busy ? 'Opening checkout…' : `Get ${card.name}`}
+              {busyId === card.price.id ? 'Opening checkout…' : `Get ${card.name}`}
             </button>
           {:else}
             <button
@@ -116,7 +120,7 @@
       {/each}
     </div>
     {#if error}
-      <p class="text-center text-sm text-destructive">{error}</p>
+      <p class="text-center text-sm text-destructive" role="alert">{error}</p>
     {/if}
     <p class="text-center text-sm text-muted-foreground">
       Keys live on your <a

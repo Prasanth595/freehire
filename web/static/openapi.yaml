@@ -5,7 +5,10 @@ info:
   description: |
     Public, read-only freehire API: search IT jobs, read the live filter
     vocabulary, inspect job and company details, and find similar jobs. Every
-    operation here is unauthenticated. The authenticated tracking surface
+    operation here answers without a key; an API plan's key only raises the rate
+    limit. Keyless use is for personal and non-commercial use — showing the
+    postings in a product you offer to others needs an API plan (see the
+    [data licence](https://freehire.me/terms#data-licence)). The authenticated tracking surface
     (saved jobs, application stages, CV tooling) is deliberately excluded — this
     schema is the integration contract for search, and is also what the freehire
     custom GPT imports as an Action.
