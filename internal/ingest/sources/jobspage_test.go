@@ -138,3 +138,19 @@ func TestJobspageWorkModeAndEmployment(t *testing.T) {
 		}
 	}
 }
+
+// A board with no openings is an empty array; a page without the key is a reshaped page, and
+// reading it as empty would close every posting the board still lists.
+func TestJobspageListingWithoutJobsDataFails(t *testing.T) {
+	empty := (&routedHTTP{}).route("acme.jobspage.co", jobspageListing())
+	jobs, err := NewJobspage(empty).Fetch(context.Background(), CompanyEntry{Company: "Acme", Provider: "jobspage", Board: "acme"})
+	if err != nil || len(jobs) != 0 {
+		t.Fatalf("empty board: jobs=%d err=%v, want 0 and no error", len(jobs), err)
+	}
+
+	reshaped := (&routedHTTP{}).route("acme.jobspage.co",
+		`<script id="__NEXT_DATA__" type="application/json">{"props":{"pageProps":{}}}</script>`)
+	if _, err := NewJobspage(reshaped).Fetch(context.Background(), CompanyEntry{Company: "Acme", Provider: "jobspage", Board: "acme"}); err == nil {
+		t.Fatal("listing without jobsData: want an error, got none")
+	}
+}

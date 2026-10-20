@@ -39,11 +39,13 @@ func (jobspage) Provider() string { return "jobspage" }
 // — no loop that could stop early. See the fullBoardListing interface for the bar.
 func (jobspage) fullBoardListing() {}
 
-// jobspageNextData is the slice of a listing page's __NEXT_DATA__ we read.
+// jobspageNextData is the slice of a listing page's __NEXT_DATA__ we read. JobsData is a
+// pointer so a page that lost the key is told apart from a board with no openings, which the
+// platform serves as an empty array: read as empty, a reshaped page would close every posting.
 type jobspageNextData struct {
 	Props struct {
 		PageProps struct {
-			JobsData []jobspagePosting `json:"jobsData"`
+			JobsData *[]jobspagePosting `json:"jobsData"`
 		} `json:"pageProps"`
 	} `json:"props"`
 }
@@ -82,9 +84,12 @@ func (s jobspage) Fetch(ctx context.Context, e CompanyEntry) ([]Job, error) {
 	if err := json.Unmarshal([]byte(raw), &data); err != nil {
 		return nil, fmt.Errorf("jobspage: decode listing %s: %w", e.Board, err)
 	}
+	if data.Props.PageProps.JobsData == nil {
+		return nil, fmt.Errorf("jobspage: no jobsData in listing %s", e.Board)
+	}
 
 	var open []jobspagePosting
-	for _, p := range data.Props.PageProps.JobsData {
+	for _, p := range *data.Props.PageProps.JobsData {
 		if !p.IsExpired {
 			open = append(open, p)
 		}
