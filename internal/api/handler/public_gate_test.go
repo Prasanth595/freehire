@@ -166,8 +166,8 @@ func TestPublicGate_StrictAnonymousIsSharedPerMinuteAndPerDay(t *testing.T) {
 	gateGet(t, app, "/read", nil)
 	gateGet(t, app, "/agent", nil)
 	one := []check{
-		{"anonday:" + gateIP, anonPerDay, 24 * time.Hour},
 		{"anon:" + gateIP, anonPerMinute, time.Minute},
+		{"anonday:" + gateIP, anonPerDay, 24 * time.Hour},
 	}
 	if got := rec.got(); !equalChecks(got, append(one, one...)) {
 		t.Fatalf("checks = %+v, want the same two shared keys on both routes", got)
@@ -209,7 +209,7 @@ func TestPublicGate_KeysWithoutAPaidFullScopeAreAnonymous(t *testing.T) {
 			app := gateApp(newTestGate(rec, paidKeys(), true, ""))
 			gateGet(t, app, "/read", bearer(token))
 			got := rec.got()
-			if len(got) == 0 || got[len(got)-1].key != "anon:"+gateIP {
+			if len(got) == 0 || got[0].key != "anon:"+gateIP {
 				t.Fatalf("checks = %+v, want the anonymous budget", got)
 			}
 		})
@@ -237,7 +237,7 @@ func TestPublicGate_ResolvedTiersAreCachedFailuresAreNot(t *testing.T) {
 	if broken.lookups != 2 {
 		t.Fatalf("lookups = %d, want 2 — a failure must not be cached", broken.lookups)
 	}
-	if got := rec.got(); got[len(got)-1].key != "anon:"+gateIP {
+	if got := rec.got(); got[0].key != "anon:"+gateIP {
 		t.Fatalf("checks = %+v, want anonymous", got)
 	}
 }
@@ -417,5 +417,39 @@ func TestPublicGate_ChatAgentBudgetStaysLegacyUnderStrict(t *testing.T) {
 	want := []check{{"agentsearch:" + gateIP, agentSearchPerMinute, time.Minute}}
 	if got := rec.got(); !equalChecks(got, want) {
 		t.Fatalf("checks = %+v, want %+v — OpenAI's shared egress must not meet a per-IP daily cap", got, want)
+	}
+}
+
+// minuteRefuser refuses the anonymous per-minute budget and admits everything else, counting
+// what the daily budget was charged.
+type minuteRefuser struct {
+	mu         sync.Mutex
+	dayCharged int
+}
+
+func (m *minuteRefuser) Allow(_ context.Context, key string, limit int, window time.Duration) (ratelimit.Decision, error) {
+	if strings.HasPrefix(key, "anon:") {
+		return ratelimit.Decision{Limit: limit, ResetAfter: window, RetryAfter: time.Second}, nil
+	}
+	if strings.HasPrefix(key, "anonday:") {
+		m.mu.Lock()
+		m.dayCharged++
+		m.mu.Unlock()
+	}
+	return ratelimit.Decision{Allowed: true, Limit: limit, Remaining: limit - 1, ResetAfter: window}, nil
+}
+
+// A request the minute refuses must not cost a day: a skill bursting past the minute cap
+// would otherwise burn its whole daily allowance on refusals within minutes.
+func TestPublicGate_AMinuteRefusalSpendsNoDay(t *testing.T) {
+	m := &minuteRefuser{}
+	app := gateApp(newTestGate(m, paidKeys(), true, ""))
+	for range 5 {
+		if code, _ := gateGet(t, app, "/read", nil); code != fiber.StatusTooManyRequests {
+			t.Fatalf("status = %d, want 429 from the minute", code)
+		}
+	}
+	if m.dayCharged != 0 {
+		t.Fatalf("the daily budget was charged %d times for requests the minute refused", m.dayCharged)
 	}
 }

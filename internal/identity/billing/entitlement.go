@@ -98,7 +98,9 @@ type entitlement struct {
 	Data time.Time
 }
 
-// entitlementFrom resolves every tier from ONE re-read of the subscriber.
+// entitlementFrom resolves every tier of both products — Pro/Ultra and the API product's
+// API/Data — from ONE re-read of the subscriber. (proUntilFrom is the "furthest entitling
+// period end" reduction; it serves every list, not only Pro's.)
 //
 // Which tier a subscription confers is decided by which configured price list its price
 // appears in, reusing the same filter rather than a second copy of it. That is also why an

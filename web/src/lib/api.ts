@@ -68,7 +68,7 @@ import type {
   UserJob,
   VoteResult,
   ApiKey,
-  APIPlan,
+  ApiPlan,
   CreatedApiKey,
   OAuthGrant,
   WebhookConfig,
@@ -1695,8 +1695,8 @@ export function createApi(
   // createApiKey, and never again.
 
   /** The caller's API product tier and the rate its full-scope keys get (cookie-only). */
-  async function getAPIPlan(): Promise<APIPlan> {
-    return requestData<APIPlan>('/api/v1/me/api-plan');
+  async function getApiPlan(): Promise<ApiPlan> {
+    return requestData<ApiPlan>('/api/v1/me/api-plan');
   }
 
   /** The current user's API keys (metadata only — no secret). */
@@ -3186,7 +3186,7 @@ export function createApi(
     markNotificationRead,
     markAllNotificationsRead,
     listApiKeys,
-    getAPIPlan,
+    getApiPlan,
     createApiKey,
     revokeApiKey,
     listOAuthGrants,

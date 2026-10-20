@@ -158,7 +158,7 @@ export interface PlansMatrix {
 /** The caller's API product tier (`GET /api/v1/me/api-plan`). An empty `tier` means the
  *  account does not hold the product; `per_minute` is the rate its full-scope keys get on
  *  the public read API. */
-export interface APIPlan {
+export interface ApiPlan {
   tier: '' | 'api' | 'api_data';
   per_minute: number;
   until?: string;

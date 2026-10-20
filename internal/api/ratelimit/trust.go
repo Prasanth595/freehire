@@ -42,14 +42,10 @@ var trustedNets = func() []*net.IPNet {
 	return nets
 }()
 
-// trustedPeer reports whether the request comes from a peer we do not rate-limit.
-func trustedPeer(c *fiber.Ctx) bool {
+// TrustedPeer reports whether the request comes from a peer we do not rate-limit.
+func TrustedPeer(c *fiber.Ctx) bool {
 	return trusted(c.IP(), c.Context().RemoteIP())
 }
-
-// TrustedPeer is trustedPeer for a caller building its own limiter from Enforce, which does
-// not apply the exemption itself.
-func TrustedPeer(c *fiber.Ctx) bool { return trustedPeer(c) }
 
 // trusted decides on the address the request CLAIMS to come from, falling back to the socket
 // it actually came from when it claims nothing.

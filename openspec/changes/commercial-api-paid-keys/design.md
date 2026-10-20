@@ -42,7 +42,7 @@ exact duplication `CheckoutURL` was fixed to prevent.
 `entitlement` gains `API` and `Data`. No `_granted`/`_revenuecat` sources and no generated columns:
 Stripe is the only seller (YAGNI; add a source column if manual grants are ever needed).
 `billing-sync`'s due-soon query widens to the two new columns. Tier resolution is a pure function
-`apiplan.TierOf(apiUntil, dataUntil, now)` beside the limiter.
+`billing.APITierOf(apiUntil, dataUntil, now)` — billing owns the product.
 
 ### D3. Key resolution only when a Bearer key is presented, cached in process
 The public-read gate inspects `Authorization` itself. No header → no lookup, so anonymous traffic
@@ -53,6 +53,10 @@ falls through to the anonymous rules (fail-open to the cheaper tier, never 503).
 *Alternative:* move `OptionalAuth` in front — rejected for the reasons the existing comment gives;
 it also bumps `last_used_at` per request, which is a write on the hottest path.
 Consequence: a revoked key or lapsed tier keeps its paid rate for up to 60s; acceptable.
+After review: the lookup also requires a minted key's shape, spends a per-IP lookup budget
+(30 uncached lookups/min, checked without touching the response), runs under a 150ms timeout
+and single-flight, and fake keys live in a bounded miss cache apart from real ones so they
+cannot evict them.
 
 ### D4. One gate, budgets by caller class
 A single `publicLimiter(budget)` middleware replaces `publicReadLimiter` and `agentSearchLimiter`:
@@ -60,7 +64,13 @@ A single `publicLimiter(budget)` middleware replaces `publicReadLimiter` and `ag
 1. trusted peer → pass (unchanged behaviour);
 2. verified-bot header equals secret → pass;
 3. paid full-scope key → `Allow("paid:<tier>:<user_id>", rate, 1m)`;
-4. otherwise → `Allow("anon:min:<ip>", 120, 1m)` then `Allow("anon:day:<ip>", 2000, 24h)`.
+4. otherwise → `anon:<ip>` 120/1m, and only if that admits, `anonday:<ip>` 2000/24h. GCRA
+   charges only what it admits, so a minute refusal costs no day; the admitted response reports
+   the minute's headers (`ratelimit.Check` + `ratelimit.Apply`).
+
+`/mcp` and `/mcp/account` mount `chatAgentLimiter`, which keeps the agent-search per-minute budget
+under strict: OpenAI's shared egress would turn a per-IP daily cap into a cap on the channel.
+Under strict the OJCP manifest declares no rate, since 2,000/day has no honest per-second figure.
 
 Anonymous budgets are shared by read and agent-search routes on purpose: a mirror switching routes
 must not double its allowance. Paid budgets are per account (all its keys), not per key. The
@@ -103,6 +113,14 @@ unsetting it.
 Rollback: restore the env numbers; the columns are inert.
 
 ## Open Questions
+
+- **Discounts on the API product.** Checkout applies promo and invite discounts to any sold
+  price, and a collected API invoice would settle a referral reward. Undecided.
+- **Visitors behind one address.** The SPA calls the public API from the browser, so under
+  strict an office or campus NAT shares 2,000/day. Measure page-originated API calls per IP
+  from the access log before setting strict.
+- API-only subscribers have no in-app billing section (overview stays Pro/Ultra); they manage
+  the subscription through the provider's portal.
 
 - Adzuna and other aggregator sources may forbid sublicensing their postings; checked before the
   licence text ships (task 6.1), and if needed those sources are named as excluded from the licence.

@@ -73,7 +73,9 @@ type publicBudget struct {
 var (
 	publicReadBudget  = publicBudget{name: "publicread", perMinute: publicReadsPerMinute}
 	agentSearchBudget = publicBudget{name: "agentsearch", perMinute: agentSearchPerMinute}
-	chatAgentBudget   = publicBudget{name: "agentsearch", perMinute: agentSearchPerMinute, legacyOnly: true}
+	// The same NAME as agentSearchBudget on purpose: the MCP surfaces and /agent/jobs/search
+	// run the same query, so they draw on one bucket, as they did before this gate existed.
+	chatAgentBudget = publicBudget{name: agentSearchBudget.name, perMinute: agentSearchPerMinute, legacyOnly: true}
 )
 
 // apiKeyTiers resolves a presented key to its owner and the owner's API entitlement.
@@ -152,13 +154,22 @@ func (g *publicGate) enforce(c *fiber.Ctx, b publicBudget, userID int64, tier bi
 	if !g.cfg.Strict || b.legacyOnly {
 		return ratelimit.Enforce(c, g.throttler, b.name+":"+ip, b.perMinute, time.Minute)
 	}
-	// The day first and the minute LAST: each check writes the budget headers, and on an
-	// admitted request the ones left standing must be the minute's, which is the budget a
-	// client actually paces against and the one that will refuse it first.
-	if err := ratelimit.Enforce(c, g.throttler, "anonday:"+ip, anonPerDay, 24*time.Hour); err != nil {
-		return err
+	// The minute FIRST, so a request it refuses never reaches the day: GCRA charges only what
+	// it admits, and a skill bursting past the minute cap would otherwise burn its daily
+	// allowance on refusals within minutes. On an admitted request the response reports the
+	// minute's budget — the one a client paces against and the one that refuses it first.
+	minuteKey, dayKey := "anon:"+ip, "anonday:"+ip
+	minute, minuteKnown := ratelimit.Check(c, g.throttler, minuteKey, anonPerMinute, time.Minute)
+	if minuteKnown && !minute.Allowed {
+		return ratelimit.Apply(c, minute, minuteKey, time.Minute)
 	}
-	return ratelimit.Enforce(c, g.throttler, "anon:"+ip, anonPerMinute, time.Minute)
+	if day, dayKnown := ratelimit.Check(c, g.throttler, dayKey, anonPerDay, 24*time.Hour); dayKnown && !day.Allowed {
+		return ratelimit.Apply(c, day, dayKey, 24*time.Hour)
+	}
+	if minuteKnown {
+		return ratelimit.Apply(c, minute, minuteKey, time.Minute)
+	}
+	return nil
 }
 
 // paidPerMinute is the public-read rate an API tier buys; zero for no tier.
@@ -252,16 +263,10 @@ func (g *publicGate) resolve(c *fiber.Ctx, hash string) (db.ResolveAPIKeyTierRow
 	return db.ResolveAPIKeyTierRow{}, false
 }
 
-// lookupAllowed spends one of the caller's uncached-lookup budget. It asks the Throttler
-// directly rather than through ratelimit.Enforce, because this budget is internal: it must
-// not write rate-limit headers or a Retry-After onto a request that is then served. Fail-open
-// like every limiter here.
+// lookupAllowed spends one of the caller's uncached-lookup budget. It is a ratelimit.Check and
+// never an Apply: this budget is internal, so it must not write rate-limit headers or a
+// Retry-After onto a request that is then served. Fail-open like every limiter here.
 func (g *publicGate) lookupAllowed(c *fiber.Ctx) bool {
-	if g.throttler == nil {
-		return true
-	}
-	ctx, cancel := context.WithTimeout(c.Context(), keyLookupTimeout)
-	defer cancel()
-	d, err := g.throttler.Allow(ctx, "keylookup:"+c.IP(), keyLookupsPerMinute, time.Minute)
-	return err != nil || d.Allowed
+	d, known := ratelimit.Check(c, g.throttler, "keylookup:"+c.IP(), keyLookupsPerMinute, time.Minute)
+	return !known || d.Allowed
 }

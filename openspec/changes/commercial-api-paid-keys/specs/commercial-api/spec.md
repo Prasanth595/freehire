@@ -73,6 +73,10 @@ anonymous.
 - **WHEN** resolving the presented key fails because the database is unavailable
 - **THEN** the request is limited as anonymous rather than refused
 
+#### Scenario: Made-up keys cannot flood the database
+- **WHEN** one IP presents more distinct, not-yet-cached keys in a minute than its key-lookup budget (30) allows, or a key that does not have the shape of a minted key
+- **THEN** no lookup is made for it and the request is limited as anonymous, without a Retry-After of its own
+
 ### Requirement: Anonymous public reads are bounded per minute and per day
 
 A public read route request that is not a paid key and not a verified bot SHALL be limited per IP
@@ -96,7 +100,19 @@ sale before the free tier tightens.
 
 #### Scenario: The refusal names the paid tier
 - **WHEN** an anonymous public read is refused with 429
-- **THEN** the error message points to the API plans page
+- **THEN** the error message points to the API plans page, and a paid key's refusal does not
+
+#### Scenario: A minute refusal costs no day
+- **WHEN** an anonymous request is refused by the per-minute budget
+- **THEN** it is not counted against the daily budget, and an admitted request reports the per-minute budget in its `X-RateLimit-*` headers
+
+#### Scenario: The ChatGPT app keeps its budget under strict
+- **WHEN** `PUBLIC_ANON_LIMITS=strict` and an anonymous request reaches `/mcp` or `/mcp/account`
+- **THEN** it is limited by the agent-search per-minute budget alone, because those requests arrive from OpenAI's shared egress addresses
+
+#### Scenario: The OJCP manifest declares only what holds
+- **WHEN** `PUBLIC_ANON_LIMITS=strict`
+- **THEN** the OJCP manifest declares no anonymous rate, since a daily cap has no honest per-second figure
 
 ### Requirement: Verified bots are exempt from the anonymous limits
 
@@ -120,9 +136,13 @@ secret is configured, SHALL be treated as anonymous. The comparison SHALL be con
 
 The Terms SHALL state that an account holding a live API tier may store the data it reads and
 display it in its own product, SHALL NOT resell or redistribute the raw data as a dataset, and
-SHALL link each displayed posting to its freehire page or credit "via freehire.me". The pricing
-page SHALL offer the API and Data plans, and the OpenAPI document SHALL declare bearer-key
-authentication and the anonymous and paid limits.
+SHALL link each displayed posting to its freehire page or credit "via freehire.me"; that the
+permission ends with the plan; and that keyless use is personal and non-commercial. The pricing
+page SHALL offer the API and Data plans with the limits `GET /plans` reports as `api_limits`, the
+key-management page SHALL show the account's API tier (`GET /me/api-plan`), and the OpenAPI
+document SHALL declare optional bearer-key authentication, the anonymous and paid limits and
+the keyless terms. The Data plan is sold before its bulk files exist and SHALL say they are
+coming rather than imply they are included.
 
 #### Scenario: Licence is published
 - **WHEN** a visitor opens `/terms`

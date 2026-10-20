@@ -5,20 +5,20 @@
   import { isAuthenticated } from '$lib/auth.svelte';
   import { locale } from '$lib/i18n/currentLocale.svelte';
   import { format, t } from '$lib/i18n/t';
-  import type { APIPlan } from '$lib/types';
+  import type { ApiPlan } from '$lib/types';
   import { messages } from './ApiPlanPanel.messages';
 
   // Which API product tier the account holds, beside the keys it applies to. Only full-access
   // keys get the plan's rate; an embed key is published on other sites by design.
   const s = $derived(t(messages, locale()));
 
-  const plan = new AsyncData<APIPlan | null>(null);
+  const plan = new AsyncData<ApiPlan | null>(null);
   $effect(() => {
-    if (isAuthenticated()) void plan.run(() => api.getAPIPlan());
+    if (isAuthenticated()) void plan.run(() => api.getApiPlan());
   });
 
   // The sentence for a held tier, with its end date when the server sent a readable one.
-  const activeLine = (p: APIPlan) => {
+  const activeLine = (p: ApiPlan) => {
     if (!p.tier) return '';
     const params = { tier: s.tiers[p.tier], rate: p.per_minute.toLocaleString(locale()) };
     const until = p.until ? new Date(p.until) : null;

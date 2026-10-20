@@ -718,6 +718,7 @@ func Register(app *fiber.App, cfg Config) {
 	// same catalogue, or the two answers drift.
 	ojcpH := newOJCPHandlers(jobSearch, queries, cfg.FrontendOrigin, atsapply.SubmittableProviders())
 	ojcpH.signer = cfg.OJCPSigner
+	ojcpH.anonStrict = cfg.PublicAnonStrict
 	// Assigned only when set: a nil *search.QueryEmbedder in the interface field would be
 	// a non-nil interface, and the handler's "no backend" check would never fire.
 	if cfg.QueryEmbedder != nil {

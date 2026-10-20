@@ -9,14 +9,14 @@
 - [x] 2.1 Config: `STRIPE_API_PRICE_IDS`, `STRIPE_API_DATA_PRICE_IDS`; `Sells` admits all four lists
 - [x] 2.2 `entitlement` gains `API`/`Data`; `entitlementFrom` resolves them from the same re-read; `store` writes them
 - [x] 2.3 Checkout picks the requested price's family for `decideCheckoutTarget` (Pro subscriber buying API opens a new session; API→Data upgrades in place; API subscriber buying Pro opens a new session)
-- [x] 2.4 `apiplan.TierOf(apiUntil, dataUntil, now)` pure resolver (data > api > none)
+- [x] 2.4 `billing.APITierOf(apiUntil, dataUntil, now)` pure resolver (data > api > none)
 
 ## 3. Limiter
 
 - [x] 3.1 Paid-key resolver: Bearer `fhk_` only, hash, 60s in-process TTL cache of results incl. negatives, errors not cached and degrade to anonymous, only `full` scope counts
 - [x] 3.2 Verified-bot check: `X-FH-Verified-Bot` vs `VERIFIED_BOT_SECRET`, constant-time, unset disables
 - [x] 3.3 `publicLimiter(budget)` gate: trusted peer → bot → paid (per account, tier rate) → anonymous (legacy per-route budgets, or `PUBLIC_ANON_LIMITS=strict` shared 120/min + 2,000/day); 429 message names `/pricing#api`
-- [x] 3.4 Mount the gate everywhere `publicReadLimiter`/`agentSearchLimiter` were mounted; delete the two; rewrite the guard tests in `public_read_limit*_test.go` for the new caller classes (incl. unpaid full key and paid embed key stay IP-keyed) and drive them through `register`
+- [x] 3.4 Mount the gate everywhere `publicReadLimiter`/`agentSearchLimiter` were mounted (both now thin wrappers over the gate, plus `chatAgentLimiter` for MCP); rewrite the guard tests in `public_read_limit*_test.go` for the new caller classes (incl. unpaid full key and paid embed key stay IP-keyed) and drive them through `register`
 
 ## 4. Web
 
@@ -31,6 +31,6 @@
 
 ## 6. Ship
 
-- [x] 6.1 Check upstream source terms (Adzuna and other aggregators) against the licence text; exclude sources if required
+- [ ] 6.1 Check upstream source terms (Adzuna and other aggregators) against the licence text; exclude sources if required — the licence carries a general "no rights a source has not given us" clause; a per-source check is still owed
 - [x] 6.2 `go vet -tags=integration ./...`, full tagged suite for billing and handler, web checks
 - [ ] 6.3 PR → CI → merge → deploy; ops checklist for the user: Stripe product/prices, env, CF Transform Rule + secret, then `PUBLIC_ANON_LIMITS=strict`

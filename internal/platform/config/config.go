@@ -526,6 +526,9 @@ func Load() Settings {
 	return s
 }
 
+// StrictAnonLimits reports PUBLIC_ANON_LIMITS=strict, the one value besides empty it accepts.
+func (s Settings) StrictAnonLimits() bool { return s.PublicAnonLimits == "strict" }
+
 // Validate checks that the configuration values are safe to boot the auth surface with.
 // The JWT secret check runs in every environment, not just production: HS256 security
 // rests entirely on secret entropy, so a short secret is brute-forceable offline against
@@ -537,7 +540,7 @@ func (s Settings) Validate() error {
 	if strings.HasPrefix(s.FrontendOrigin, "https://") && !s.CookieSecure {
 		return errors.New("COOKIE_SECURE must be true when using HTTPS origin")
 	}
-	if s.PublicAnonLimits != "" && s.PublicAnonLimits != "strict" {
+	if s.PublicAnonLimits != "" && !s.StrictAnonLimits() {
 		return fmt.Errorf("PUBLIC_ANON_LIMITS must be empty or \"strict\", got %q", s.PublicAnonLimits)
 	}
 	if len(s.JWTSecret) < 32 {
