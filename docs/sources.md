@@ -2,7 +2,7 @@
 
 The [README](../README.md) covers what freehire is; this is the full per-source
 breakdown behind the "3.3M+ jobs" headline. Snapshot of 2026-10-20 —
-**3,404,669 unique open postings** from **304** sources that currently carry one
+**3,371,563 unique open postings** from **304** sources that currently carry one
 (**320** adapters are registered in all). A posting is counted once: reposts of
 the same job across boards are collapsed (a posting two sources carry is still
 counted under each, so the sections sum slightly higher), and these are the figures
