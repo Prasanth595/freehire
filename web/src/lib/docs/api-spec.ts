@@ -2348,6 +2348,9 @@ data: {"type":"result","stop_reason":"completed"}
         path: '/me/subscriptions',
         auth: 'cookie',
         summary: 'Subscribe a saved search to a digest channel.',
+        description:
+          'Channels: `telegram`, `email`, `push`, `webhook`. `push` needs a device the freehire mobile app has ' +
+          'registered (`GET /me/push-tokens`) — without one the request is refused with 409.',
         body: [
           { name: 'saved_search_id', type: 'integer', required: true, description: 'The saved search to subscribe.', example: '2' },
           { name: 'channel', type: 'string', required: true, description: 'Delivery channel.', example: 'telegram' },
@@ -2436,7 +2439,9 @@ data: {"type":"result","stop_reason":"completed"}
         summary: 'Create your webhook destination, or update its URL if one already exists.',
         description:
           'There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a ' +
-          'saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.',
+          'saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here. ' +
+          'Before the URL is stored it receives a test delivery (`saved_search_name` "freehire webhook test", an ' +
+          'empty `jobs` list); a URL that does not answer it with a 2xx is refused with 422, naming what it answered.',
         body: [
           { name: 'url', type: 'string', required: true, description: 'Destination URL — must be http or https.', example: 'https://example.com/hook' },
         ],
@@ -2455,6 +2460,18 @@ data: {"type":"result","stop_reason":"completed"}
   -H 'Content-Type: application/json' -b cookies.txt \\
   -d '{"enabled":false}'`,
         responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }`,
+      },
+      {
+        method: 'POST',
+        path: '/me/webhook/test',
+        auth: 'cookie',
+        summary: 'Send a test delivery to your stored webhook destination.',
+        description:
+          'The same sample delivery saving a URL sends. A 2xx answer stamps `last_success_at` and returns the ' +
+          'destination; anything else is a 422 naming what the destination answered, and changes nothing. ' +
+          '404 when no destination is configured.',
+        curl: `curl -X POST "${BASE_URL}/me/webhook/test" -b cookies.txt`,
+        responseExample: `{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": "2026-09-04T13:00:00Z", "disabled_at": null } }`,
       },
       {
         method: 'DELETE',
@@ -2974,7 +2991,12 @@ data: {"type":"result","stop_reason":"completed"}
         summary: 'Change your notification rule.',
         body: [
           { name: 'enabled', type: 'boolean', description: 'Turn notifications on or off.' },
-          { name: 'channels', type: 'string[]', description: 'Delivery channels: `email`, `telegram`.' },
+          {
+            name: 'channels',
+            type: 'string[]',
+            description:
+              'Delivery channels: `email`, `telegram`, `push`. Adding `push` needs a device the mobile app has registered (409 otherwise).',
+          },
         ],
         curl: `curl -X PUT "${BASE_URL}/me/notification-settings" -b cookies.txt \\
   -H 'Content-Type: application/json' -d '{"enabled":true,"channels":["email"]}'`,

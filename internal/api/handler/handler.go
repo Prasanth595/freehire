@@ -44,6 +44,7 @@ import (
 	"github.com/strelov1/freehire/internal/engage/processreport"
 	"github.com/strelov1/freehire/internal/engage/referral"
 	"github.com/strelov1/freehire/internal/engage/report"
+	"github.com/strelov1/freehire/internal/engage/webhooknotify"
 	"github.com/strelov1/freehire/internal/identity/accountdelete"
 	"github.com/strelov1/freehire/internal/identity/accounts"
 	"github.com/strelov1/freehire/internal/identity/auth"
@@ -468,7 +469,7 @@ type Config struct {
 	AWSRegion       string
 	NotifyEmailFrom string
 	// ExtensionRedirectAllowlist bounds the browser-extension connect flow: only
-	// https://<id>.chromiumapp.org redirects whose <id> is listed may receive a
+	// https://<id>.chromiumapp.org or <id>.extensions.allizom.org redirects whose <id> is listed may receive a
 	// minted token. Empty leaves the connect endpoint refusing every redirect.
 	ExtensionRedirectAllowlist []string
 	// ServedHosts are the exact hostnames honoured as an OAuth redirect origin.
@@ -564,7 +565,7 @@ func Register(app *fiber.App, cfg Config) {
 	savedSearchH := newSavedSearchHandlers(queries)
 	jobListH := newJobListHandlers(queries)
 	subscriptionH := newSubscriptionHandlers(queries)
-	webhookH := newWebhookHandlers(queries)
+	webhookH := newWebhookHandlers(queries, webhooknotify.NewNotifier())
 	profileSvc := userprofile.New(userprofile.NewQueriesRepository(queries))
 	// The candidate's own screening answers (visa, salary, notice period, relocation, …) —
 	// a distinct singleton from profileSvc above (search/targeting preferences, a

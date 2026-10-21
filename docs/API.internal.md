@@ -114,7 +114,7 @@ Every facet below supports repeat-OR, `_mode=and`, and `_exclude` as described a
 
 | Param | Filter | Values |
 | --- | --- | --- |
-| `collections` | Collection | yc, techstars, a16z-portfolio, a16z-speedrun, european, ai, mag7, bigtech, unicorn, fortune500, eastern-roots, indian-roots, ai-native, uk-skilled-worker-sponsor, nl-recognised-sponsor, us-h1b-sponsor |
+| `collections` | Collection | yc, techstars, a16z-portfolio, a16z-speedrun, european, ai, mag7, bigtech, unicorn, fortune500, eastern-roots, indian-roots, ai-native, uk-skilled-worker-sponsor, nl-recognised-sponsor, us-h1b-sponsor, ca-lmia-employer, ie-permit-employer, dk-fast-track-company |
 | `regions` | Region | global, north_america, latam, eu, uk, mena, africa, apac, cis, none |
 | `work_mode` | Work format | remote, hybrid, onsite |
 | `category` | Specialization | software_engineering, backend, frontend, fullstack, mobile, devops, sre, network_engineering, data_engineering, data_science, data_analytics, ml_ai, ai_engineering, qa, security, hardware, embedded, blockchain, architecture, design, creative, engineering_design, industrial_engineering, occupational_safety, product, project_management, healthcare, skilled_trades, retail, hospitality, logistics, education, personal_services, administration, social_services, science, manufacturing, public_safety, marketing, sales, support, business_analysis, solutions_engineering, developer_relations, technical_writing, recruiting, hr, finance, legal, operations, customer_success, other. The retired value management is still accepted and answered as role_type=people_manager |
@@ -1147,6 +1147,8 @@ curl "https://freehire.me/api/v1/me/subscriptions" -b cookies.txt
 
 Subscribe a saved search to a digest channel.
 
+Channels: `telegram`, `email`, `push`, `webhook`. `push` needs a device the freehire mobile app has registered (`GET /me/push-tokens`) — without one the request is refused with 409.
+
 **Body**
 
 | Name | Type | Required | Description |
@@ -1302,7 +1304,7 @@ curl "https://freehire.me/api/v1/me/webhook" -b cookies.txt
 
 Create your webhook destination, or update its URL if one already exists.
 
-There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here.
+There is exactly one destination per account. Deliveries are plain, unsigned HTTP POSTs — subscribe a saved search to the `webhook` channel (see `POST /me/subscriptions`) to receive its matches here. Before the URL is stored it receives a test delivery (`saved_search_name` "freehire webhook test", an empty `jobs` list); a URL that does not answer it with a 2xx is refused with 422, naming what it answered.
 
 **Body**
 
@@ -1340,6 +1342,22 @@ curl -X PATCH "https://freehire.me/api/v1/me/webhook" \
 
 ```json
 { "data": { "url": "https://example.com/hook", "enabled": false, "created_at": "2026-09-04T12:00:00Z", "last_success_at": null, "disabled_at": "2026-09-04T13:00:00Z" } }
+```
+
+### `POST /me/webhook/test`
+
+**Auth:** Session only
+
+Send a test delivery to your stored webhook destination.
+
+The same sample delivery saving a URL sends. A 2xx answer stamps `last_success_at` and returns the destination; anything else is a 422 naming what the destination answered, and changes nothing. 404 when no destination is configured.
+
+```bash
+curl -X POST "https://freehire.me/api/v1/me/webhook/test" -b cookies.txt
+```
+
+```json
+{ "data": { "url": "https://example.com/hook", "enabled": true, "created_at": "2026-09-04T12:00:00Z", "last_success_at": "2026-09-04T13:00:00Z", "disabled_at": null } }
 ```
 
 ### `DELETE /me/webhook`
@@ -1858,7 +1876,7 @@ Change your notification rule.
 | Name | Type | Required | Description |
 | --- | --- | --- | --- |
 | `enabled` | boolean | no | Turn notifications on or off. |
-| `channels` | string[] | no | Delivery channels: `email`, `telegram`. |
+| `channels` | string[] | no | Delivery channels: `email`, `telegram`, `push`. Adding `push` needs a device the mobile app has registered (409 otherwise). |
 
 ```bash
 curl -X PUT "https://freehire.me/api/v1/me/notification-settings" -b cookies.txt \

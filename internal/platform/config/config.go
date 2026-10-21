@@ -89,10 +89,12 @@ type Settings struct {
 
 	// TypesafeAPIKey backs the Jev provider for every discrete-choice LLM call that opts
 	// in: the autofill agent's Choose call (internal/ai/autofillagent.JevPlanner),
-	// select-kind auto-apply drafting (internal/api/atsapply.JevSelectDrafter), and
-	// inbox mail classification (internal/application/mailclassify). Empty disables it
-	// outright: each falls back to its own LLM path exactly as it did before this
-	// setting existed. Unrelated to LLM_* — it is read fresh here.
+	// select-kind auto-apply drafting (internal/api/atsapply.JevSelectDrafter), the
+	// Telegram vacancy judge (internal/ingest/telegram.JevJudge, in cmd/tg-ingest and
+	// cmd/backfill-telegram-prefilter), and inbox mail classification
+	// (internal/application/mailclassify). Empty disables it outright for all four: each
+	// falls back to exactly what it did before this setting existed. Unrelated to LLM_* —
+	// it is read fresh here.
 	TypesafeAPIKey string
 
 	// Meilisearch backs the job search endpoint and the reindex command. Shared
@@ -324,8 +326,9 @@ type Settings struct {
 	ServedHosts []string
 
 	// ExtensionRedirectAllowlist bounds where the browser-extension connect flow
-	// may hand back a minted token: only https://<id>.chromiumapp.org redirects
-	// whose <id> is listed here are accepted. Empty disables the connect flow.
+	// may hand back a minted token: only https://<id>.chromiumapp.org (Chrome) or
+	// https://<id>.extensions.allizom.org (Firefox) redirects whose <id> is listed
+	// here are accepted. Empty disables the connect flow.
 	ExtensionRedirectAllowlist []string
 
 	// AutoApplyOrchestratorSecret is the shared, static credential
