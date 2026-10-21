@@ -34,7 +34,7 @@ export type CollectionSection = CollectionSectionDef & { rows: CollectionRow[] }
 // issues a hundred-odd count searches, and firing them all at once is a burst the
 // search index then serves in one go for nothing.
 async function mapLimit<T, R>(items: T[], limit: number, fn: (item: T) => Promise<R>): Promise<R[]> {
-  const out = new Array<R>(items.length);
+  const out: R[] = [];
   let next = 0;
   const worker = async () => {
     while (next < items.length) {
