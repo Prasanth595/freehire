@@ -53,6 +53,20 @@ var signalRubric = map[StatusSignal]string{
 	SignalOther:                 "anything not about an application, such as a sign-in code",
 }
 
+// signalCriteria is the signal question's criteria, built once: every label in
+// SignalValues needs a rubric, and a label added without one fails at load.
+var signalCriteria = func() map[string]string {
+	criteria := make(map[string]string, len(SignalValues))
+	for _, name := range SignalValues {
+		rubric := signalRubric[StatusSignal(name)]
+		if rubric == "" {
+			panic("mailclassify: jev: no rubric for " + name)
+		}
+		criteria[name] = rubric
+	}
+	return criteria
+}()
+
 type jevGen interface {
 	Classify(ctx context.Context, in Input) (Classification, error)
 }
@@ -112,10 +126,6 @@ func (j *jevClient) Classify(ctx context.Context, in Input) (Classification, err
 	if err := candidatesAskable(in.Candidates); err != nil {
 		return Classification{}, err
 	}
-	questions, err := jevQuestions(in)
-	if err != nil {
-		return Classification{}, err
-	}
 	body, err := json.Marshal(jevRequest{
 		State: jevState{
 			From:    llm.TruncateRunes(in.FromName, maxHeaderRunes),
@@ -123,7 +133,7 @@ func (j *jevClient) Classify(ctx context.Context, in Input) (Classification, err
 			Body:    llm.TruncateRunes(in.Body, maxBodyRunes),
 		},
 		Model:     jevModel,
-		Questions: questions,
+		Questions: jevQuestions(in),
 	})
 	if err != nil {
 		return Classification{}, fmt.Errorf("mailclassify: jev: encode request: %w", err)
@@ -175,24 +185,16 @@ func candidatesAskable(candidates []Candidate) error {
 	return nil
 }
 
-func jevQuestions(in Input) (map[string]jevQuestion, error) {
-	criteria := make(map[string]string, len(SignalValues))
-	for _, name := range SignalValues {
-		rubric := signalRubric[StatusSignal(name)]
-		if rubric == "" {
-			return nil, fmt.Errorf("mailclassify: jev: no rubric for %s", name)
-		}
-		criteria[name] = rubric
-	}
+func jevQuestions(in Input) map[string]jevQuestion {
 	questions := map[string]jevQuestion{
 		jevSignalQuestion: {
 			Type:         "choice",
 			Instructions: jevSignalInstructions,
-			Criteria:     criteria,
+			Criteria:     signalCriteria,
 		},
 	}
 	if len(in.Candidates) == 0 {
-		return questions, nil
+		return questions
 	}
 	apps := make(map[string]string, len(in.Candidates)+1)
 	apps[jevNoneApplication] = "none of these applications"
@@ -208,7 +210,7 @@ func jevQuestions(in Input) (map[string]jevQuestion, error) {
 		Instructions: jevApplicationInstructions,
 		Criteria:     apps,
 	}
-	return questions, nil
+	return questions
 }
 
 func classificationFrom(answers map[string]jevAnswer, in Input) (Classification, error) {
@@ -221,7 +223,7 @@ func classificationFrom(answers map[string]jevAnswer, in Input) (Classification,
 	}
 	p, ok := signal.Probabilities[signal.Choice]
 	if !ok || math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 1 {
-		return Classification{}, fmt.Errorf("mailclassify: jev: signal %q has no probability", signal.Choice)
+		return Classification{}, fmt.Errorf("mailclassify: jev: signal %q has no usable probability", signal.Choice)
 	}
 	out := Classification{Signal: StatusSignal(signal.Choice), Confidence: p}
 	if len(in.Candidates) == 0 {
