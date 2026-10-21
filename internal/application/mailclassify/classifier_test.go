@@ -103,6 +103,10 @@ func TestClassifyKeepsValidMatch(t *testing.T) {
 	if got.Signal != SignalInterviewInvitation || got.MatchedJobID != 1 {
 		t.Errorf("got (%q, %d), want (interview_invitation, 1)", got.Signal, got.MatchedJobID)
 	}
+	// The LLM answers one confidence for both; it stands for the pick too.
+	if got.MatchConfidence != 0.9 {
+		t.Errorf("match confidence = %v, want 0.9", got.MatchConfidence)
+	}
 }
 
 type fakeJev struct {

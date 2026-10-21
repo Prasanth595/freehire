@@ -33,12 +33,16 @@ func TestJevLiveSignalAndApplication(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Classify: %v", err)
 	}
-	t.Logf("signal=%s confidence=%.3f job=%d", got.Signal, got.Confidence, got.MatchedJobID)
+	t.Logf("signal=%s confidence=%.3f job=%d match_confidence=%.3f",
+		got.Signal, got.Confidence, got.MatchedJobID, got.MatchConfidence)
 	if got.Signal != SignalInterviewInvitation {
 		t.Errorf("signal = %q, want interview_invitation", got.Signal)
 	}
 	if got.MatchedJobID != 22 {
 		t.Errorf("matched job = %d, want 22 (Derq)", got.MatchedJobID)
+	}
+	if got.MatchConfidence <= 0 || got.MatchConfidence > 1 {
+		t.Errorf("match confidence = %v, want (0,1] — application probabilities missing?", got.MatchConfidence)
 	}
 	if got.Confidence <= 0 || got.Confidence > 1 {
 		t.Errorf("confidence = %v, want (0,1] — probabilities missing from the answer?", got.Confidence)

@@ -99,6 +99,32 @@ func TestJevClientPicksOfferedApplication(t *testing.T) {
 	if out.Signal != SignalAcknowledgement || out.MatchedJobID != 7 || out.Confidence != 0.97 {
 		t.Errorf("got (%q, %d, %v)", out.Signal, out.MatchedJobID, out.Confidence)
 	}
+	if out.MatchConfidence != 0.8 {
+		t.Errorf("match confidence = %v, want 0.8 (the application answer's probability)", out.MatchConfidence)
+	}
+}
+
+func TestJevClientRejectsApplicationWithoutProbability(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"answers": map[string]any{
+				jevSignalQuestion: map[string]any{
+					"choice":        "acknowledgement",
+					"probabilities": map[string]float64{"acknowledgement": 0.97},
+				},
+				jevApplicationQuestion: map[string]any{"choice": "7"},
+			},
+		})
+	}))
+	t.Cleanup(srv.Close)
+
+	client := newJevClient("test-key", withJevBaseURL(srv.URL))
+	if _, err := client.Classify(context.Background(), Input{
+		Subject:    "Thanks for applying",
+		Candidates: []Candidate{{JobID: 7, Company: "Globex"}},
+	}); err == nil {
+		t.Fatal("a picked application without a probability must be rejected, not linked at 0")
+	}
 }
 
 func TestJevClientNoneApplicationStaysUnlinked(t *testing.T) {

@@ -221,8 +221,8 @@ func classificationFrom(answers map[string]jevAnswer, in Input) (Classification,
 	if !validSignals[StatusSignal(signal.Choice)] {
 		return Classification{}, fmt.Errorf("mailclassify: jev: unknown signal %q", signal.Choice)
 	}
-	p, ok := signal.Probabilities[signal.Choice]
-	if !ok || math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 1 {
+	p, ok := chosenProbability(signal)
+	if !ok {
 		return Classification{}, fmt.Errorf("mailclassify: jev: signal %q has no usable probability", signal.Choice)
 	}
 	out := Classification{Signal: StatusSignal(signal.Choice), Confidence: p}
@@ -240,6 +240,20 @@ func classificationFrom(answers map[string]jevAnswer, in Input) (Classification,
 	if err != nil || !matchAllowed(id, in.Candidates) {
 		return Classification{}, fmt.Errorf("mailclassify: jev: application choice %q was not offered", app.Choice)
 	}
+	matchP, ok := chosenProbability(app)
+	if !ok {
+		return Classification{}, fmt.Errorf("mailclassify: jev: application %q has no usable probability", app.Choice)
+	}
 	out.MatchedJobID = id
+	out.MatchConfidence = matchP
 	return out, nil
+}
+
+// chosenProbability is the probability Jev gave its own choice, if it is a usable one.
+func chosenProbability(a jevAnswer) (float64, bool) {
+	p, ok := a.Probabilities[a.Choice]
+	if !ok || math.IsNaN(p) || math.IsInf(p, 0) || p < 0 || p > 1 {
+		return 0, false
+	}
+	return p, true
 }

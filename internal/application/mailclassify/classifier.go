@@ -92,6 +92,7 @@ func (c *Classifier) Classify(ctx context.Context, in Input) (Classification, er
 	if err := json.Unmarshal([]byte(raw), &out); err != nil {
 		return Classification{}, fmt.Errorf("%w: %w", ErrUnparseableResponse, err)
 	}
+	out.MatchConfidence = out.Confidence
 	out = out.Sanitize()
 	out.MatchedJobID = validateMatch(out.MatchedJobID, in.Candidates)
 	return out, nil
