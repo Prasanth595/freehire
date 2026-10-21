@@ -2,9 +2,10 @@
 
 A Cloudflare clearance belongs to one host and one exit IP, so a session is reused only for the
 key it was opened for: the challenge is solved once and every later page of the crawl rides on
-it. Several sessions may share a key when one host is crawled in parallel. A global cap bounds
-memory (a browser session peaks at ~1.7 GB); past it, an idle session of another key is closed
-to make room, and if none is idle the caller waits — but only for `acquire_timeout`, because a
+it. A session serves up to `per_session` uses at once — one browser, several tabs, far cheaper
+than a browser each — and several sessions may share a key when one host needs more than that.
+A global cap bounds memory (a browser session peaks at ~1.7 GB); past it, an idle session of
+another key is closed to make room, and if none is idle the caller waits — but only for `acquire_timeout`, because a
 caller that has given up and retried would otherwise leave its abandoned request queued, and
 then spend a browser on a page nobody reads.
 
@@ -29,8 +30,11 @@ class PoolClosed(Exception):
 class _Entry:
     key: Hashable
     session: Any
-    busy: bool
+    in_use: int
     last_used: float
+    # retired: a use of this session failed. It takes no new uses and is closed when its
+    # last in-flight one (a neighbouring tab) finishes.
+    retired: bool = False
 
 
 class SessionPool:
@@ -41,10 +45,12 @@ class SessionPool:
         max_sessions: int,
         idle_ttl: float,
         acquire_timeout: Optional[float] = None,
+        per_session: int = 1,
         clock: Callable[[], float] = time.monotonic,
     ):
-        if max_sessions < 1:
-            raise ValueError("max_sessions must be at least 1")
+        if max_sessions < 1 or per_session < 1:
+            raise ValueError("max_sessions and per_session must be at least 1")
+        self._per = per_session
         self._factory = factory
         self._max = max_sessions
         self._ttl = idle_ttl
@@ -77,8 +83,8 @@ class SessionPool:
                 if self._closed:
                     raise PoolClosed("the pool is closed")
                 for e in self._entries:
-                    if e.key == key and not e.busy:
-                        e.busy = True
+                    if e.key == key and not e.retired and e.in_use < self._per:
+                        e.in_use += 1
                         return e
                 if len(self._entries) + self._opening < self._max:
                     break
@@ -103,7 +109,7 @@ class SessionPool:
                 self._cond.notify_all()
                 closed = True
             else:
-                entry = _Entry(key=key, session=session, busy=True, last_used=self._clock())
+                entry = _Entry(key=key, session=session, in_use=1, last_used=self._clock())
                 self._entries.append(entry)
                 closed = False
         if closed:
@@ -124,27 +130,32 @@ class SessionPool:
             raise PoolBusy(f"no browser session came free within {self._acquire_timeout}s") from None
 
     def _idle_lru(self):
-        idle = [e for e in self._entries if not e.busy]
+        idle = [e for e in self._entries if e.in_use == 0]
         return min(idle, key=lambda e: e.last_used) if idle else None
 
     async def _release(self, entry: _Entry) -> None:
         async with self._cond:
-            entry.busy = False
+            entry.in_use -= 1
             entry.last_used = self._clock()
-            self._cond.notify_all()
-
-    async def _discard(self, entry: _Entry) -> None:
-        async with self._cond:
-            if entry in self._entries:
+            close = entry.retired and entry.in_use == 0
+            if close and entry in self._entries:
                 self._entries.remove(entry)
             self._cond.notify_all()
-        await _close_quietly(entry.session)
+        if close:
+            await _close_quietly(entry.session)
+
+    async def _discard(self, entry: _Entry) -> None:
+        """Retire a session whose use failed: no new use gets it, and it closes once its other
+        in-flight uses finish — closing it now would kill the neighbouring tabs."""
+        async with self._cond:
+            entry.retired = True
+        await self._release(entry)
 
     async def reap(self) -> None:
         """Close every idle session unused for longer than the idle TTL."""
         now = self._clock()
         async with self._cond:
-            stale = [e for e in self._entries if not e.busy and now - e.last_used > self._ttl]
+            stale = [e for e in self._entries if e.in_use == 0 and now - e.last_used > self._ttl]
             for e in stale:
                 self._entries.remove(e)
             if stale:
