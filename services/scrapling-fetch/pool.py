@@ -26,12 +26,18 @@ class PoolClosed(Exception):
     """The pool is shutting down."""
 
 
+class UseTimedOut(Exception):
+    """A use ran past the pool's hard per-use deadline; its session is retired."""
+
+
 @dataclass
 class _Entry:
     key: Hashable
     session: Any
     in_use: int
     last_used: float
+    created_at: float = 0.0
+    uses: int = 0
     # retired: a use of this session failed. It takes no new uses and is closed when its
     # last in-flight one (a neighbouring tab) finishes.
     retired: bool = False
@@ -46,11 +52,20 @@ class SessionPool:
         idle_ttl: float,
         acquire_timeout: Optional[float] = None,
         per_session: int = 1,
+        max_age: Optional[float] = None,
+        max_uses: Optional[int] = None,
+        use_timeout: Optional[float] = None,
         clock: Callable[[], float] = time.monotonic,
     ):
         if max_sessions < 1 or per_session < 1:
             raise ValueError("max_sessions and per_session must be at least 1")
         self._per = per_session
+        # A session in constant use never idles out while Chromium grows over its life, so
+        # age and use count retire it too; a use past use_timeout is cut off and its session
+        # retired, so one hung tab cannot hold a slot for ever.
+        self._max_age = max_age
+        self._max_uses = max_uses
+        self._use_timeout = use_timeout
         self._factory = factory
         self._max = max_sessions
         self._ttl = idle_ttl
@@ -68,7 +83,13 @@ class SessionPool:
         """Run fn on a session for key. A session whose use raised is closed, never reused."""
         entry = await self._acquire(key)
         try:
-            result = await fn(entry.session)
+            if self._use_timeout is None:
+                result = await fn(entry.session)
+            else:
+                result = await asyncio.wait_for(fn(entry.session), self._use_timeout)
+        except asyncio.TimeoutError:
+            await self._discard(entry)
+            raise UseTimedOut(f"a use ran past {self._use_timeout}s") from None
         except BaseException:
             await self._discard(entry)
             raise
@@ -78,14 +99,21 @@ class SessionPool:
     async def _acquire(self, key: Hashable) -> _Entry:
         deadline = None if self._acquire_timeout is None else self._clock() + self._acquire_timeout
         evicted = None
+        expired: List[_Entry] = []
         async with self._cond:
             while True:
                 if self._closed:
                     raise PoolClosed("the pool is closed")
+                expired.extend(self._retire_expired())
                 for e in self._entries:
                     if e.key == key and not e.retired and e.in_use < self._per:
                         e.in_use += 1
-                        return e
+                        e.uses += 1
+                        break
+                else:
+                    e = None
+                if e is not None:
+                    break
                 if len(self._entries) + self._opening < self._max:
                     break
                 evicted = self._idle_lru()
@@ -93,8 +121,16 @@ class SessionPool:
                     self._entries.remove(evicted)
                     break
                 await self._wait(deadline)
-            self._opening += 1  # from here on the slot is ours until the session is registered
+            if e is None:
+                self._opening += 1  # from here on the slot is ours until the session is registered
+        if e is not None:
+            for x in expired:
+                await _close_quietly(x.session)
+            return e
         try:
+            # Inside the try: a cancellation during these closes must release the reserved slot.
+            for x in expired:
+                await _close_quietly(x.session)
             if evicted is not None:
                 await _close_quietly(evicted.session)  # outside the lock: closing a browser is slow
             session = await self._factory(key)
@@ -109,7 +145,8 @@ class SessionPool:
                 self._cond.notify_all()
                 closed = True
             else:
-                entry = _Entry(key=key, session=session, in_use=1, last_used=self._clock())
+                now = self._clock()
+                entry = _Entry(key=key, session=session, in_use=1, last_used=now, created_at=now, uses=1)
                 self._entries.append(entry)
                 closed = False
         if closed:
@@ -128,6 +165,23 @@ class SessionPool:
             await asyncio.wait_for(self._cond.wait(), remaining)
         except asyncio.TimeoutError:
             raise PoolBusy(f"no browser session came free within {self._acquire_timeout}s") from None
+
+    def _retire_expired(self) -> List[_Entry]:
+        """Retire every session past its age or use limit; return the idle ones, removed, for
+        the caller to close outside the lock. A busy one closes when its last use releases."""
+        now = self._clock()
+        closing = []
+        for e in list(self._entries):
+            if e.retired:
+                continue
+            old = self._max_age is not None and now - e.created_at > self._max_age
+            worn = self._max_uses is not None and e.uses >= self._max_uses
+            if old or worn:
+                e.retired = True
+                if e.in_use == 0:
+                    self._entries.remove(e)
+                    closing.append(e)
+        return closing
 
     def _idle_lru(self):
         idle = [e for e in self._entries if e.in_use == 0]
