@@ -1,6 +1,6 @@
 module github.com/strelov1/freehire
 
-go 1.26.9
+go 1.26.10
 
 require (
 	github.com/JohannesKaufmann/html-to-markdown/v2 v2.5.2
